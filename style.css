@@ -6,364 +6,249 @@
 html,
 body {
   margin: 0;
-  width: 100%;
   min-height: 100%;
   font-family: Arial, sans-serif;
-  background: #07080c;
-  color: #ffffff;
+  background: #050505;
+  color: #fff;
 }
 
 body {
   min-height: 100vh;
-  display: flex;
-  justify-content: center;
 }
 
 button,
 input {
-  font-family: inherit;
+  font: inherit;
 }
 
 button {
+  border: 0;
   cursor: pointer;
-}
-
-.app {
-  width: 100%;
-  max-width: 480px;
-  min-height: 100vh;
-  padding: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-section {
-  width: 100%;
 }
 
 .hidden {
   display: none !important;
 }
 
-
-/* =========================
-   LOGIN / MENU / SALA
-========================= */
+.app {
+  width: 100%;
+  max-width: 430px;
+  min-height: 100vh;
+  margin: auto;
+  padding: 22px;
+  background:
+    radial-gradient(
+      circle at top,
+      #211533 0%,
+      #09090c 42%,
+      #050505 100%
+    );
+}
 
 #login,
 #home,
 #room {
-  background: #101116;
-  border: 1px solid #252731;
-  border-radius: 26px;
-  padding: 26px 20px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.35);
+  padding-top: 55px;
 }
 
 .logo {
-  font-size: 34px;
+  font-size: 38px;
   font-weight: 900;
-  letter-spacing: -1.5px;
+  letter-spacing: 5px;
   line-height: .95;
 }
 
 .logo span {
   display: block;
-  color: #777bff;
-  font-size: 17px;
-  letter-spacing: 5px;
+  color: #9b6cff;
+  font-size: 18px;
+  letter-spacing: 8px;
   margin-top: 8px;
 }
 
-.subtitle {
-  color: #858996;
-  margin: 14px 0 24px;
+.subtitle,
+#home > p {
+  color: #8f8f98;
+  font-size: 14px;
 }
 
 input {
   width: 100%;
-  height: 54px;
+  height: 52px;
+  margin-top: 20px;
   padding: 0 16px;
-  border: 1px solid #292c36;
-  border-radius: 15px;
+  border: 1px solid #29292f;
+  border-radius: 14px;
   outline: none;
-  background: #181a21;
-  color: #fff;
-  font-size: 16px;
+  background: #101014;
+  color: white;
 }
 
 input:focus {
-  border-color: #777bff;
+  border-color: #8655ff;
 }
 
 button {
   width: 100%;
-  min-height: 52px;
-  margin-top: 11px;
-  border: 1px solid #2c2f3a;
-  border-radius: 15px;
-  background: #181a21;
-  color: #fff;
-  font-size: 15px;
+  min-height: 50px;
+  margin-top: 12px;
+  border-radius: 14px;
+  background: #fff;
+  color: #050505;
   font-weight: 800;
-  transition:
-    transform .12s,
-    background .15s;
 }
 
 button:active {
   transform: scale(.98);
 }
 
-#loginButton,
-#create,
-#start {
-  border: none;
-  background: #6d70ff;
-}
-
-#loginButton:hover,
-#create:hover,
-#start:hover {
-  background: #777bff;
-}
-
 .secondary {
-  background: transparent;
-  border-color: #292c36;
-  color: #8d909c;
-}
-
-#home h1 {
-  margin: 24px 0 6px;
-  font-size: 30px;
-  letter-spacing: -1px;
-}
-
-#home > p {
-  color: #858996;
-  margin: 0 0 20px;
+  background: #151519;
+  color: #ddd;
+  border: 1px solid #29292f;
 }
 
 .profile {
   display: flex;
   align-items: center;
-  gap: 13px;
-  padding: 13px;
-  border: 1px solid #292c36;
-  background: #181a21;
-  border-radius: 18px;
-}
-
-.profile-label {
-  color: #777b86;
-  font-size: 12px;
-  margin-bottom: 3px;
-}
-
-.profile-name {
-  font-size: 16px;
-  font-weight: 800;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #24242a;
+  border-radius: 16px;
+  background: #0e0e12;
+  margin-bottom: 28px;
 }
 
 .avatar {
-  width: 43px;
-  height: 43px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: #6d70ff;
-  color: #fff;
-  font-size: 18px;
-  font-weight: 900;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(
+    135deg,
+    #fff,
+    #7550ff
+  );
 }
 
-
-/* =========================
-   SALA
-========================= */
-
-#room {
-  padding: 20px;
+.profile-label {
+  color: #777780;
+  font-size: 11px;
 }
 
-#room h2 {
-  margin: 0;
-  font-size: 28px;
-  letter-spacing: -1px;
+.profile-name {
+  margin-top: 3px;
+  font-weight: 800;
+}
+
+h1 {
+  margin-bottom: 6px;
+}
+
+h2 {
+  margin-bottom: 8px;
 }
 
 .code {
-  position: relative;
-  margin: 20px 0 15px;
-  padding: 19px 16px;
+  margin-top: 20px;
+  padding: 18px;
   text-align: center;
-  background: #181a21;
-  border: 1px solid #292c36;
-  border-radius: 19px;
+  border: 1px solid #29292f;
+  border-radius: 16px;
+  background: #0d0d11;
 }
 
 .code span {
   display: block;
-  color: #777b86;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  margin-bottom: 8px;
+  color: #777780;
+  font-size: 12px;
 }
 
 .code strong {
-  font-size: 32px;
+  display: block;
+  margin-top: 8px;
+  font-size: 30px;
   letter-spacing: 7px;
 }
 
-#status {
-  margin: 12px 0 18px;
-  text-align: center;
-  color: #858996;
-  font-size: 14px;
-}
-
-
-/* =========================
-   VOZ
-========================= */
-
 .voice-panel {
-  margin: 15px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
   padding: 14px;
-  border: 1px solid #292c36;
-  border-radius: 18px;
-  background: #181a21;
+  border: 1px solid #29292f;
+  border-radius: 16px;
+  background: #0d0d11;
 }
 
 .voice-info {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex: 1;
 }
 
 .voice-title {
-  font-size: 14px;
   font-weight: 800;
 }
 
 .voice-status {
-  color: #777b86;
-  font-size: 11px;
-  text-align: right;
+  margin-top: 4px;
+  color: #777780;
+  font-size: 12px;
 }
 
 .mic-button {
-  margin-top: 10px;
-  min-height: 46px;
-  background: #20232c;
-  border-color: #30333e;
+  width: auto;
+  min-width: 125px;
+  margin: 0;
+  min-height: 42px;
+  padding: 0 12px;
 }
 
-.mic-button.active {
-  background: #6d70ff;
-  border-color: #6d70ff;
-  color: #ffffff;
+.mic-button.active,
+#gameVoiceButton.active {
+  background: #8d5cff;
+  color: white;
 }
 
-.mic-button.disabled {
-  background: #181a21;
-  color: #777b86;
+#status {
+  margin: 15px 0;
+  color: #85858e;
+  font-size: 13px;
 }
-
-
-/* =========================
-   JOGADORES
-========================= */
 
 #players {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 0 0 16px;
 }
 
-.player {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 62px;
-  padding: 9px 12px;
-  border-radius: 16px;
-  background: #181a21;
-  border: 1px solid #292c36;
-}
-
-.player .avatar {
-  width: 40px;
-  height: 40px;
+.player-row {
+  padding: 12px;
   border-radius: 12px;
-  font-size: 16px;
+  background: #101014;
+  border: 1px solid #24242a;
 }
-
-.player-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 800;
-}
-
-.player-status {
-  margin-left: auto;
-  color: #66e39b;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-#remoteAudios {
-  display: none;
-}
-
-
-/* =========================
-   PARTIDA
-========================= */
 
 #game {
-  min-height: calc(100vh - 36px);
-  display: flex;
-  flex-direction: column;
+  min-height: calc(100vh - 44px);
+  margin: -22px;
+  padding: 22px;
   background:
     radial-gradient(
-      circle at 50% 35%,
-      rgba(109, 112, 255, .12),
-      transparent 45%
-    ),
-    #08090e;
-  border: 1px solid #242733;
-  border-radius: 26px;
-  padding: 20px;
-  box-shadow:
-    0 20px 70px rgba(0,0,0,.45);
+      circle at center,
+      #24133c,
+      #09090d 55%,
+      #030303
+    );
 }
 
 .game-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-}
-
-.game-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 7px;
+  align-items: flex-start;
 }
 
 .game-label {
-  color: #777bff;
+  color: #9b70ff;
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 2px;
@@ -375,38 +260,36 @@ button:active {
   font-weight: 900;
 }
 
-.game-players {
-  padding: 9px 12px;
-  border: 1px solid #292c36;
-  border-radius: 12px;
-  background: #12141a;
-  color: #9a9daa;
-  font-size: 12px;
-  font-weight: 800;
+.game-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
 }
 
-
-/* Botão criado pelo game.js */
+.game-players {
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: #111116;
+  border: 1px solid #29292f;
+  font-size: 12px;
+}
 
 #gameVoiceButton {
-  width: auto !important;
+  width: auto;
   min-width: 92px;
-  min-height: 38px !important;
-  margin-top: 0 !important;
+  min-height: 38px;
+  margin: 0;
   padding: 0 12px;
-  border-radius: 12px !important;
-  font-size: 12px !important;
-  font-weight: 800;
+  border-radius: 12px;
+  background: #151519;
+  color: #aaa;
+  border: 1px solid #29292f;
+  font-size: 12px;
 }
 
-
-/* =========================
-   GAME CENTER
-========================= */
-
 .game-center {
-  flex: 1;
-  min-height: 430px;
+  min-height: 70vh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -415,109 +298,63 @@ button:active {
 }
 
 .countdown-label {
-  color: #858996;
-  font-size: 12px;
-  font-weight: 900;
+  color: #8e8e98;
+  font-size: 13px;
   letter-spacing: 3px;
+  font-weight: 800;
 }
 
 .countdown-number {
   margin-top: 12px;
-  font-size: 110px;
-  line-height: 1;
+  font-size: 100px;
   font-weight: 900;
-  letter-spacing: -8px;
-  text-shadow:
-    0 0 35px rgba(119, 123, 255, .35);
-}
-
-#referenceScreen h2,
-#recordScreen h2,
-#resultScreen h2 {
-  margin: 12px 0 8px;
-  font-size: 28px;
-}
-
-#referenceScreen p,
-#resultScreen p {
-  max-width: 290px;
-  color: #858996;
-  line-height: 1.5;
-}
-
-#referenceButton {
-  width: auto;
-  min-width: 210px;
-  padding: 0 25px;
-  background: #6d70ff;
-  border: none;
 }
 
 .record-timer {
-  margin-top: 20px;
-  font-size: 72px;
+  margin-top: 25px;
+  font-size: 70px;
   font-weight: 900;
 }
 
 .record-status {
-  margin-top: 10px;
-  color: #858996;
-  font-size: 13px;
+  margin-top: 12px;
+  color: #92929a;
 }
 
+#wheel {
+  width: 190px;
+  height: 190px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 8px solid #22222a;
+  background: #101014;
+  font-size: 20px;
+  font-weight: 900;
+  box-shadow: 0 0 45px rgba(140, 90, 255, .18);
+}
 
-/* =========================
-   RESPONSIVO
-========================= */
+#wheelResult {
+  margin-top: 24px;
+}
 
 @media (max-width: 360px) {
-
   .app {
-    padding: 12px;
-  }
-
-  #login,
-  #home,
-  #room {
-    padding: 21px 16px;
-    border-radius: 22px;
+    padding: 17px;
   }
 
   #game {
-    padding: 16px;
-    border-radius: 22px;
+    margin: -17px;
+    padding: 17px;
   }
 
-  .logo {
-    font-size: 30px;
+  .voice-panel {
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .code strong {
-    font-size: 28px;
-    letter-spacing: 5px;
+  .mic-button {
+    width: 100%;
   }
-
-  .countdown-number {
-    font-size: 90px;
-  }
-
-  .game-center {
-    min-height: 400px;
-  }
-
-  .game-header {
-    gap: 8px;
-  }
-
-  .game-players {
-    padding: 8px 9px;
-    font-size: 11px;
-  }
-
-  #gameVoiceButton {
-    min-width: 82px;
-    padding: 0 9px;
-    font-size: 11px !important;
-  }
-
 }
