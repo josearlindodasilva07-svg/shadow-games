@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <title>Shadow Games</title>
+
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -11,34 +13,102 @@
 
   <main class="app">
 
-    <section id="home">
-      <h1>Shadow Games</h1>
-      <p>Party game multiplayer</p>
+    <!-- LOGIN -->
+    <section id="login">
 
-      <input id="name" maxlength="16" placeholder="Seu nome">
+      <div class="logo">
+        SHADOW
+        <span>GAMES</span>
+      </div>
 
-      <button id="create">Criar sala</button>
-      <button id="join">Entrar em sala</button>
+      <p class="subtitle">
+        Entre para continuar
+      </p>
+
+      <input
+        id="username"
+        maxlength="16"
+        autocomplete="off"
+        placeholder="Nome de usuário"
+      >
+
+      <button id="loginButton">
+        Entrar
+      </button>
+
     </section>
 
+
+    <!-- MENU -->
+    <section id="home" class="hidden">
+
+      <div class="profile">
+        <div id="profileAvatar" class="avatar"></div>
+
+        <div>
+          <div class="profile-label">
+            Jogando como
+          </div>
+
+          <div id="profileName" class="profile-name">
+            -
+          </div>
+        </div>
+      </div>
+
+      <h1>Shadow Games</h1>
+
+      <p>
+        Party game multiplayer
+      </p>
+
+      <button id="create">
+        Criar sala
+      </button>
+
+      <button id="join">
+        Entrar em sala
+      </button>
+
+      <button id="logout" class="secondary">
+        Trocar conta
+      </button>
+
+    </section>
+
+
+    <!-- SALA -->
     <section id="room" class="hidden">
+
       <h2>Sala</h2>
 
       <div class="code">
-        <span>Código</span>
-        <strong id="roomCode">------</strong>
+
+        <span>Código da sala</span>
+
+        <strong id="roomCode">
+          ------
+        </strong>
+
       </div>
 
-      <p id="status">Conectando...</p>
+      <p id="status">
+        Conectando...
+      </p>
 
       <div id="players"></div>
 
-      <button id="start">Começar partida</button>
+      <button id="start">
+        Começar partida
+      </button>
+
     </section>
 
   </main>
 
+
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
   <script src="game.js"></script>
 
 </body>
