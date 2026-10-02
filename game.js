@@ -3,53 +3,28 @@ const home = document.getElementById("home");
 const room = document.getElementById("room");
 const game = document.getElementById("game");
 
-const usernameInput =
-  document.getElementById("username");
+const usernameInput = document.getElementById("username");
+const loginButton = document.getElementById("loginButton");
 
-const loginButton =
-  document.getElementById("loginButton");
+const profileName = document.getElementById("profileName");
+const profileAvatar = document.getElementById("profileAvatar");
 
-const profileName =
-  document.getElementById("profileName");
+const createButton = document.getElementById("create");
+const joinButton = document.getElementById("join");
+const logoutButton = document.getElementById("logout");
 
-const profileAvatar =
-  document.getElementById("profileAvatar");
+const copyCodeButton = document.getElementById("copyCode");
+const leaveRoomButton = document.getElementById("leaveRoom");
 
-const createButton =
-  document.getElementById("create");
+const startButton = document.getElementById("start");
 
-const joinButton =
-  document.getElementById("join");
+const roomCodeElement = document.getElementById("roomCode");
+const statusElement = document.getElementById("status");
+const playersElement = document.getElementById("players");
 
-const logoutButton =
-  document.getElementById("logout");
-
-const copyCodeButton =
-  document.getElementById("copyCode");
-
-const leaveRoomButton =
-  document.getElementById("leaveRoom");
-
-const startButton =
-  document.getElementById("start");
-
-const roomCodeElement =
-  document.getElementById("roomCode");
-
-const statusElement =
-  document.getElementById("status");
-
-const playersElement =
-  document.getElementById("players");
-
-const micButton =
-  document.getElementById("micButton");
-
-const voiceStatus =
-  document.getElementById("voiceStatus");
-
-const remoteAudios =
-  document.getElementById("remoteAudios");
+const micButton = document.getElementById("micButton");
+const voiceStatus = document.getElementById("voiceStatus");
+const remoteAudios = document.getElementById("remoteAudios");
 
 const countdownScreen =
   document.getElementById("countdownScreen");
@@ -87,79 +62,69 @@ const resultText =
 ========================= */
 
 let peer = null;
-
 let hostConnection = null;
 
 let isHost = false;
 
 let myName = "";
-
 let roomCode = "";
 
 let players = [];
 
 let localStream = null;
-
 let microphoneEnabled = false;
 
-let gameStarted = false;
+/*
+  Controle separado da voz durante
+  a partida.
 
+  Isso controla SOMENTE se meu
+  microfone transmite.
+
+  Não interfere no áudio recebido.
+*/
+let gameVoiceEnabled = true;
+
+let gameStarted = false;
 let leavingRoom = false;
 
 let heartbeatTimer = null;
-
 let guestHeartbeatTimer = null;
 
 let countdownTimer = null;
 
 let voiceRetryTimer = null;
-
 let voiceRetryUntil = 0;
 
 
 /*
-  playerId -> true / false
-
-  Indica se o jogador está
-  transmitindo o próprio microfone.
+  playerId -> true/false
 */
-const voiceStates =
-  new Map();
+const voiceStates = new Map();
 
 
 /*
-  playerId -> chamada que EU iniciei.
-
-  Essa chamada transmite meu áudio
-  para o outro jogador.
+  Chamadas que eu iniciei.
 */
-const outgoingCalls =
-  new Map();
+const outgoingCalls = new Map();
 
 
 /*
-  playerId -> chamada que EU recebi.
-
-  Essa chamada permite que eu
-  receba o áudio do outro jogador.
+  Chamadas que eu recebi.
 */
-const incomingCalls =
-  new Map();
+const incomingCalls = new Map();
 
 
 /*
-  playerId -> conexão de dados
-  com o host.
+  Conexões de dados com o host.
 */
-const hostConnections =
-  new Map();
+const hostConnections = new Map();
 
 
 /*
-  playerId -> último heartbeat.
+  Último heartbeat.
 */
-const lastHeartbeat =
-  new Map();
+const lastHeartbeat = new Map();
 
 
 const ACCOUNT_KEY =
@@ -171,30 +136,24 @@ const ACCOUNT_KEY =
 ========================= */
 
 function cleanName(name) {
-
   return name
     .trim()
     .slice(0, 16);
-
 }
 
 
 function saveAccount(name) {
-
   localStorage.setItem(
     ACCOUNT_KEY,
     JSON.stringify({
       name: name
     })
   );
-
 }
 
 
 function loadAccount() {
-
   try {
-
     const saved =
       localStorage.getItem(
         ACCOUNT_KEY
@@ -216,20 +175,15 @@ function loadAccount() {
     );
 
   } catch (error) {
-
     return null;
-
   }
-
 }
 
 
 function deleteAccount() {
-
   localStorage.removeItem(
     ACCOUNT_KEY
   );
-
 }
 
 
@@ -239,111 +193,205 @@ function deleteAccount() {
 
 function openHome() {
 
-  login.classList.add(
-    "hidden"
-  );
+  login.classList.add("hidden");
+  room.classList.add("hidden");
+  game.classList.add("hidden");
 
-  room.classList.add(
-    "hidden"
-  );
-
-  game.classList.add(
-    "hidden"
-  );
-
-  home.classList.remove(
-    "hidden"
-  );
-
+  home.classList.remove("hidden");
 
   profileName.textContent =
     myName;
-
 
   profileAvatar.textContent =
     myName
       .charAt(0)
       .toUpperCase();
-
 }
 
 
 function openLogin() {
 
-  login.classList.remove(
-    "hidden"
-  );
+  login.classList.remove("hidden");
+  home.classList.add("hidden");
+  room.classList.add("hidden");
+  game.classList.add("hidden");
 
-  home.classList.add(
-    "hidden"
-  );
-
-  room.classList.add(
-    "hidden"
-  );
-
-  game.classList.add(
-    "hidden"
-  );
-
-
-  usernameInput.value =
-    "";
-
+  usernameInput.value = "";
 }
 
 
 function showRoom() {
 
-  login.classList.add(
-    "hidden"
-  );
+  login.classList.add("hidden");
+  home.classList.add("hidden");
+  game.classList.add("hidden");
 
-  home.classList.add(
-    "hidden"
-  );
-
-  game.classList.add(
-    "hidden"
-  );
-
-  room.classList.remove(
-    "hidden"
-  );
-
+  room.classList.remove("hidden");
 
   roomCodeElement.textContent =
     roomCode.toUpperCase();
+}
 
+
+function createGameVoiceButton() {
+
+  let button =
+    document.getElementById(
+      "gameVoiceButton"
+    );
+
+  if (button) {
+    return button;
+  }
+
+  button =
+    document.createElement(
+      "button"
+    );
+
+  button.id =
+    "gameVoiceButton";
+
+  button.type =
+    "button";
+
+  button.textContent =
+    "Voz: ON";
+
+  button.style.width =
+    "100%";
+
+  button.style.minHeight =
+    "50px";
+
+  button.style.marginTop =
+    "12px";
+
+  button.style.border =
+    "1px solid #292c36";
+
+  button.style.borderRadius =
+    "15px";
+
+  button.style.background =
+    "#181a21";
+
+  button.style.color =
+    "#ffffff";
+
+  button.style.fontSize =
+    "14px";
+
+  button.style.fontWeight =
+    "800";
+
+  const header =
+    game.querySelector(
+      ".game-header"
+    );
+
+  if (header) {
+    header.appendChild(
+      button
+    );
+  } else {
+    game.insertBefore(
+      button,
+      game.firstChild
+    );
+  }
+
+  button.addEventListener(
+    "click",
+    () => {
+
+      gameVoiceEnabled =
+        !gameVoiceEnabled;
+
+      updateGameVoiceButton();
+
+      /*
+        Só muda a transmissão.
+        O áudio recebido continua
+        funcionando normalmente.
+      */
+
+      if (gameVoiceEnabled) {
+
+        if (
+          localStream &&
+          microphoneEnabled
+        ) {
+          enableLocalAudioTransmission();
+        }
+
+      } else {
+
+        disableLocalAudioTransmission();
+
+      }
+
+    }
+  );
+
+  return button;
+}
+
+
+function updateGameVoiceButton() {
+
+  const button =
+    document.getElementById(
+      "gameVoiceButton"
+    );
+
+  if (!button) {
+    return;
+  }
+
+  if (gameVoiceEnabled) {
+
+    button.textContent =
+      "Voz: ON";
+
+    button.style.background =
+      "#6d70ff";
+
+    button.style.borderColor =
+      "#6d70ff";
+
+  } else {
+
+    button.textContent =
+      "Voz: OFF";
+
+    button.style.background =
+      "#181a21";
+
+    button.style.borderColor =
+      "#292c36";
+
+  }
 }
 
 
 function showGame() {
 
-  login.classList.add(
-    "hidden"
-  );
+  login.classList.add("hidden");
+  home.classList.add("hidden");
+  room.classList.add("hidden");
 
-  home.classList.add(
-    "hidden"
-  );
-
-  room.classList.add(
-    "hidden"
-  );
-
-  game.classList.remove(
-    "hidden"
-  );
-
+  game.classList.remove("hidden");
 
   gamePlayers.textContent =
     `${players.length}/5`;
 
-
   roundText.textContent =
     "Rodada 1";
 
+  createGameVoiceButton();
+
+  updateGameVoiceButton();
 }
 
 
@@ -360,7 +408,6 @@ loginButton.addEventListener(
         usernameInput.value
       );
 
-
     if (!name) {
 
       alert(
@@ -368,21 +415,16 @@ loginButton.addEventListener(
       );
 
       return;
-
     }
-
 
     myName =
       name;
-
 
     saveAccount(
       myName
     );
 
-
     openHome();
-
   }
 );
 
@@ -432,7 +474,6 @@ function generateRoomCode() {
 
   let code = "";
 
-
   for (
     let i = 0;
     i < 6;
@@ -449,9 +490,7 @@ function generateRoomCode() {
 
   }
 
-
   return code;
-
 }
 
 
@@ -459,7 +498,6 @@ function setStatus(text) {
 
   statusElement.textContent =
     text;
-
 }
 
 
@@ -469,10 +507,8 @@ function updateStatus() {
     `${players.length}/5 jogadores`
   );
 
-
   gamePlayers.textContent =
     `${players.length}/5`;
-
 }
 
 
@@ -483,13 +519,10 @@ function escapeHTML(text) {
       "div"
     );
 
-
   div.textContent =
     text;
 
-
   return div.innerHTML;
-
 }
 
 
@@ -508,7 +541,6 @@ function addPlayer(
         player.id === id
     );
 
-
   if (existing) {
 
     existing.name =
@@ -523,7 +555,6 @@ function addPlayer(
 
   }
 
-
   if (
     !voiceStates.has(id)
   ) {
@@ -535,11 +566,8 @@ function addPlayer(
 
   }
 
-
   renderPlayers();
-
   updateStatus();
-
 }
 
 
@@ -549,38 +577,30 @@ function removePlayer(id) {
     return;
   }
 
-
   players =
     players.filter(
       (player) =>
         player.id !== id
     );
 
-
   voiceStates.delete(
     id
   );
-
 
   closePlayerVoice(
     id
   );
 
-
   hostConnections.delete(
     id
   );
-
 
   lastHeartbeat.delete(
     id
   );
 
-
   renderPlayers();
-
   updateStatus();
-
 }
 
 
@@ -588,7 +608,6 @@ function renderPlayers() {
 
   playersElement.innerHTML =
     "";
-
 
   players.forEach(
     (player) => {
@@ -598,16 +617,13 @@ function renderPlayers() {
           "div"
         );
 
-
       element.className =
         "player";
-
 
       const firstLetter =
         player.name
           .charAt(0)
           .toUpperCase();
-
 
       element.innerHTML = `
         <div class="avatar">
@@ -623,14 +639,12 @@ function renderPlayers() {
         </div>
       `;
 
-
       playersElement.appendChild(
         element
       );
 
     }
   );
-
 }
 
 
@@ -643,7 +657,6 @@ function sendToAll(message) {
   if (!isHost) {
     return;
   }
-
 
   hostConnections.forEach(
     (connection) => {
@@ -665,7 +678,6 @@ function sendToAll(message) {
 
     }
   );
-
 }
 
 
@@ -678,18 +690,14 @@ function sendToAllExcept(
     return;
   }
 
-
   hostConnections.forEach(
     (connection, id) => {
 
       if (
         id === exceptId
       ) {
-
         return;
-
       }
-
 
       if (
         connection &&
@@ -708,7 +716,6 @@ function sendToAllExcept(
 
     }
   );
-
 }
 
 
@@ -725,22 +732,13 @@ function setVoiceState(
     return;
   }
 
-
   voiceStates.set(
     playerId,
     !!enabled
   );
-
 }
 
 
-/*
-  Fecha as duas direções de voz
-  com determinado jogador.
-
-  Isso NÃO altera o estado do
-  microfone.
-*/
 function closePlayerVoice(
   playerId
 ) {
@@ -750,101 +748,137 @@ function closePlayerVoice(
       playerId
     );
 
-
   const incoming =
     incomingCalls.get(
       playerId
     );
 
-
   if (outgoing) {
 
     try {
-
       outgoing.close();
-
     } catch (error) {}
 
   }
-
 
   if (incoming) {
 
     try {
-
       incoming.close();
-
     } catch (error) {}
 
   }
-
 
   outgoingCalls.delete(
     playerId
   );
 
-
   incomingCalls.delete(
     playerId
   );
 
-
   removeRemoteAudio(
     playerId
   );
-
 }
 
 
-/*
-  Fecha TODAS as chamadas.
-
-  Isso é usado ao sair da sala
-  ou destruir a conexão.
-*/
 function closeAllVoiceCalls() {
 
   outgoingCalls.forEach(
     (call) => {
 
       try {
-
         call.close();
-
       } catch (error) {}
 
     }
   );
-
 
   incomingCalls.forEach(
     (call) => {
 
       try {
-
         call.close();
-
       } catch (error) {}
 
     }
   );
 
-
   outgoingCalls.clear();
-
   incomingCalls.clear();
-
 
   remoteAudios.innerHTML =
     "";
-
 }
 
 
 /*
-  Avisa ao host se ESTE jogador
-  está transmitindo ou não.
+  Liga a faixa de áudio local.
+
+  O áudio recebido dos outros
+  não é afetado.
 */
+function enableLocalAudioTransmission() {
+
+  if (!localStream) {
+    return;
+  }
+
+  localStream
+    .getAudioTracks()
+    .forEach(
+      (track) => {
+
+        track.enabled =
+          true;
+
+      }
+    );
+
+  microphoneEnabled =
+    true;
+
+  announceMyVoiceState(
+    true
+  );
+}
+
+
+/*
+  Desliga somente a transmissão.
+
+  Continua recebendo áudio.
+*/
+function disableLocalAudioTransmission() {
+
+  if (!localStream) {
+    return;
+  }
+
+  localStream
+    .getAudioTracks()
+    .forEach(
+      (track) => {
+
+        track.enabled =
+          false;
+
+      }
+    );
+
+  /*
+    NÃO fecha incomingCalls.
+    Portanto o jogador continua
+    ouvindo os outros.
+  */
+
+  announceMyVoiceState(
+    false
+  );
+}
+
+
 function announceMyVoiceState(
   enabled
 ) {
@@ -853,16 +887,13 @@ function announceMyVoiceState(
     return;
   }
 
-
   const myId =
     peer.id;
-
 
   setVoiceState(
     myId,
     enabled
   );
-
 
   const message = {
 
@@ -876,7 +907,6 @@ function announceMyVoiceState(
       !!enabled
 
   };
-
 
   if (isHost) {
 
@@ -899,19 +929,14 @@ function announceMyVoiceState(
 
   }
 
-
   /*
-    Sempre que o próprio microfone
-    muda, recriamos as chamadas.
+    Quando meu estado muda,
+    precisamos reconstruir somente
+    as chamadas de saída.
 
-    Isso resolve o caso:
-
-    A mic ON
-    B mic OFF
-
-    depois:
-
-    B mic ON
+    As chamadas de entrada não são
+    fechadas, porque ainda preciso
+    ouvir os outros.
   */
 
   players.forEach(
@@ -921,25 +946,32 @@ function announceMyVoiceState(
         player.id !== myId
       ) {
 
-        closePlayerVoice(
-          player.id
-        );
+        const outgoing =
+          outgoingCalls.get(
+            player.id
+          );
+
+        if (outgoing) {
+
+          try {
+            outgoing.close();
+          } catch (error) {}
+
+          outgoingCalls.delete(
+            player.id
+          );
+
+        }
 
       }
 
     }
   );
 
-
   startVoiceRetry();
-
 }
 
 
-/*
-  Host recebeu mudança de voz
-  de um jogador.
-*/
 function hostHandleVoiceState(
   playerId,
   enabled
@@ -949,35 +981,29 @@ function hostHandleVoiceState(
     return;
   }
 
-
   const exists =
     players.some(
       (player) =>
         player.id === playerId
     );
 
-
   if (!exists) {
     return;
   }
-
 
   setVoiceState(
     playerId,
     enabled
   );
 
-
   /*
-    Fecha a chamada antiga para
-    permitir que a nova configuração
-    de áudio seja criada.
+    Não fecha a chamada de entrada.
+    O jogador pode continuar ouvindo.
+
+    Apenas a transmissão daquele
+    jogador será atualizada pelo
+    WebRTC.
   */
-
-  closePlayerVoice(
-    playerId
-  );
-
 
   sendToAll({
 
@@ -992,20 +1018,10 @@ function hostHandleVoiceState(
 
   });
 
-
   startVoiceRetry();
-
 }
 
 
-/*
-  Recebe estado de voz de outro
-  jogador.
-
-  IMPORTANTE:
-  o estado do MEU microfone não
-  interfere na recepção.
-*/
 function receiveVoiceState(
   playerId,
   enabled
@@ -1015,36 +1031,52 @@ function receiveVoiceState(
     return;
   }
 
-
   const oldState =
     voiceStates.get(
       playerId
     ) === true;
 
-
   const newState =
     !!enabled;
-
 
   setVoiceState(
     playerId,
     newState
   );
 
-
   if (
     oldState !== newState
   ) {
 
-    closePlayerVoice(
-      playerId
-    );
+    const outgoing =
+      outgoingCalls.get(
+        playerId
+      );
+
+    if (outgoing) {
+
+      try {
+        outgoing.close();
+      } catch (error) {}
+
+      outgoingCalls.delete(
+        playerId
+      );
+
+    }
+
+    /*
+      NÃO fecha incomingCalls.
+
+      Mesmo que o outro desligue
+      o próprio microfone, continuo
+      podendo receber áudio quando
+      ele voltar.
+    */
 
   }
 
-
   startVoiceRetry();
-
 }
 
 
@@ -1053,12 +1085,6 @@ function receiveVoiceState(
 ========================= */
 
 async function enableMicrophone() {
-
-  /*
-    Se já temos o stream,
-    simplesmente reativamos
-    a faixa de áudio.
-  */
 
   if (localStream) {
 
@@ -1073,36 +1099,28 @@ async function enableMicrophone() {
         }
       );
 
-
     microphoneEnabled =
       true;
 
-
     micButton.textContent =
       "Desativar microfone";
-
 
     micButton.classList.add(
       "active"
     );
 
-
     micButton.classList.remove(
       "disabled"
     );
 
-
     voiceStatus.textContent =
       "Microfone ligado";
-
 
     announceMyVoiceState(
       true
     );
 
-
     return;
-
   }
 
 
@@ -1115,7 +1133,6 @@ async function enableMicrophone() {
       "Microfone não suportado";
 
     return;
-
   }
 
 
@@ -1124,6 +1141,15 @@ async function enableMicrophone() {
     voiceStatus.textContent =
       "Pedindo permissão...";
 
+
+    /*
+      Configuração priorizando
+      baixa latência.
+
+      Mantemos somente echo
+      cancellation para evitar
+      retorno do áudio.
+    */
 
     const stream =
       await navigator.mediaDevices
@@ -1135,10 +1161,16 @@ async function enableMicrophone() {
               true,
 
             noiseSuppression:
-              true,
+              false,
 
             autoGainControl:
-              true
+              false,
+
+            latency:
+              0,
+
+            channelCount:
+              1
 
           },
 
@@ -1150,7 +1182,6 @@ async function enableMicrophone() {
 
     localStream =
       stream;
-
 
     microphoneEnabled =
       true;
@@ -1171,16 +1202,13 @@ async function enableMicrophone() {
     micButton.textContent =
       "Desativar microfone";
 
-
     micButton.classList.add(
       "active"
     );
 
-
     micButton.classList.remove(
       "disabled"
     );
-
 
     voiceStatus.textContent =
       "Microfone ligado";
@@ -1190,27 +1218,22 @@ async function enableMicrophone() {
       true
     );
 
-
   } catch (error) {
 
     microphoneEnabled =
       false;
 
-
     voiceStatus.textContent =
       "Microfone não autorizado";
 
-
     micButton.textContent =
       "Ativar microfone";
-
 
     micButton.classList.remove(
       "active"
     );
 
   }
-
 }
 
 
@@ -1239,32 +1262,21 @@ function disableMicrophone() {
   micButton.textContent =
     "Ativar microfone";
 
-
   micButton.classList.remove(
     "active"
   );
-
 
   micButton.classList.add(
     "disabled"
   );
 
-
   voiceStatus.textContent =
     "Microfone desligado";
 
 
-  /*
-    Desliga SOMENTE a transmissão.
-
-    As chamadas de recebimento
-    continuam funcionando.
-  */
-
   announceMyVoiceState(
     false
   );
-
 }
 
 
@@ -1310,30 +1322,23 @@ function createRemoteAudio(
         "audio"
       );
 
-
     audio.id =
       `audio-${playerId}`;
-
 
     audio.autoplay =
       true;
 
-
     audio.playsInline =
       true;
-
 
     audio.controls =
       false;
 
-
     audio.muted =
       false;
 
-
     audio.volume =
       1;
-
 
     remoteAudios.appendChild(
       audio
@@ -1345,22 +1350,22 @@ function createRemoteAudio(
   audio.autoplay =
     true;
 
-
   audio.playsInline =
     true;
-
 
   audio.muted =
     false;
 
-
   audio.volume =
     1;
-
 
   audio.srcObject =
     stream;
 
+
+  /*
+    Reprodução imediata.
+  */
 
   const playAudio =
     () => {
@@ -1369,7 +1374,6 @@ function createRemoteAudio(
 
         const promise =
           audio.play();
-
 
         if (
           promise &&
@@ -1390,16 +1394,10 @@ function createRemoteAudio(
   audio.onloadedmetadata =
     playAudio;
 
-
   playAudio();
-
 }
 
 
-/*
-  Remove somente o áudio remoto
-  daquele jogador.
-*/
 function removeRemoteAudio(
   playerId
 ) {
@@ -1409,33 +1407,21 @@ function removeRemoteAudio(
       `audio-${playerId}`
     );
 
-
   if (!audio) {
     return;
   }
 
-
   try {
-
     audio.pause();
-
   } catch (error) {}
-
 
   audio.srcObject =
     null;
 
-
   audio.remove();
-
 }
 
 
-/*
-  Alguns navegadores mobile
-  exigem interação do usuário
-  antes de reproduzir áudio.
-*/
 function unlockRemoteAudio() {
 
   remoteAudios
@@ -1448,16 +1434,13 @@ function unlockRemoteAudio() {
         audio.muted =
           false;
 
-
         audio.volume =
           1;
-
 
         try {
 
           const promise =
             audio.play();
-
 
           if (
             promise &&
@@ -1474,7 +1457,6 @@ function unlockRemoteAudio() {
 
       }
     );
-
 }
 
 
@@ -1482,7 +1464,6 @@ document.addEventListener(
   "click",
   unlockRemoteAudio
 );
-
 
 document.addEventListener(
   "touchstart",
@@ -1494,13 +1475,9 @@ document.addEventListener(
 
 
 /* =========================
-   CHAMADA DE SAÍDA
+   CHAMADAS DE SAÍDA
 ========================= */
 
-/*
-  Cria uma chamada para enviar
-  o MEU microfone para o outro.
-*/
 function startOutgoingCall(
   playerId
 ) {
@@ -1511,17 +1488,17 @@ function startOutgoingCall(
 
 
   /*
-    Sem meu microfone ligado,
-    não existe transmissão.
+    Se minha voz está OFF,
+    não crio transmissão.
   */
 
   if (
     !localStream ||
-    !microphoneEnabled
+    !microphoneEnabled ||
+    !gameVoiceEnabled
   ) {
 
     return;
-
   }
 
 
@@ -1530,14 +1507,8 @@ function startOutgoingCall(
   ) {
 
     return;
-
   }
 
-
-  /*
-    Já existe uma chamada
-    de saída.
-  */
 
   if (
     outgoingCalls.has(
@@ -1546,7 +1517,6 @@ function startOutgoingCall(
   ) {
 
     return;
-
   }
 
 
@@ -1557,8 +1527,11 @@ function startOutgoingCall(
 
     call =
       peer.call(
+
         playerId,
+
         localStream,
+
         {
 
           metadata: {
@@ -1572,6 +1545,7 @@ function startOutgoingCall(
           }
 
         }
+
       );
 
   } catch (error) {
@@ -1594,8 +1568,8 @@ function startOutgoingCall(
 
   /*
     Se o outro jogador também
-    estiver transmitindo, recebemos
-    o stream dele nesta chamada.
+    estiver transmitindo, o stream
+    dele chega aqui.
   */
 
   call.on(
@@ -1619,14 +1593,14 @@ function startOutgoingCall(
         playerId
       );
 
-
-      removeRemoteAudio(
-        playerId
-      );
-
+      /*
+        Só reconecta se ainda
+        estiver transmitindo.
+      */
 
       if (
-        microphoneEnabled
+        microphoneEnabled &&
+        gameVoiceEnabled
       ) {
 
         startVoiceRetry();
@@ -1645,14 +1619,14 @@ function startOutgoingCall(
         playerId
       );
 
-
-      removeRemoteAudio(
-        playerId
-      );
-
+      /*
+        Não removemos o áudio de
+        entrada do jogador aqui.
+      */
 
       if (
-        microphoneEnabled
+        microphoneEnabled &&
+        gameVoiceEnabled
       ) {
 
         startVoiceRetry();
@@ -1661,26 +1635,13 @@ function startOutgoingCall(
 
     }
   );
-
 }
 
 
 /* =========================
-   CHAMADA DE ENTRADA
+   CHAMADAS DE ENTRADA
 ========================= */
 
-/*
-  Recebe o microfone de outro
-  jogador.
-
-  IMPORTANTE:
-
-  Mesmo que MEU microfone esteja
-  desligado, eu respondo à chamada
-  sem enviar meu stream.
-
-  Assim continuo ouvindo.
-*/
 function answerVoiceCall(
   call
 ) {
@@ -1694,12 +1655,6 @@ function answerVoiceCall(
     call.peer;
 
 
-  /*
-    Se já existe uma chamada
-    de entrada desse jogador,
-    substituímos pela nova.
-  */
-
   const oldCall =
     incomingCalls.get(
       playerId
@@ -1709,9 +1664,7 @@ function answerVoiceCall(
   if (oldCall) {
 
     try {
-
       oldCall.close();
-
     } catch (error) {}
 
     incomingCalls.delete(
@@ -1724,19 +1677,22 @@ function answerVoiceCall(
   try {
 
     /*
-      Se meu mic está ligado,
-      mando meu áudio também.
+      Se meu microfone está ligado
+      E a voz da partida está ON,
+      envio meu áudio também.
 
-      Se está desligado,
-      respondo sem stream.
+      Caso contrário:
 
-      Nos dois casos continuo
-      recebendo o áudio do outro.
+      call.answer()
+
+      = continuo recebendo o áudio
+        sem enviar meu microfone.
     */
 
     if (
       localStream &&
-      microphoneEnabled
+      microphoneEnabled &&
+      gameVoiceEnabled
     ) {
 
       call.answer(
@@ -1752,13 +1708,10 @@ function answerVoiceCall(
   } catch (error) {
 
     try {
-
       call.close();
-
     } catch (e) {}
 
     return;
-
   }
 
 
@@ -1767,11 +1720,6 @@ function answerVoiceCall(
     call
   );
 
-
-  /*
-    Esse é o áudio enviado
-    pelo outro jogador.
-  */
 
   call.on(
     "stream",
@@ -1794,7 +1742,6 @@ function answerVoiceCall(
         playerId
       );
 
-
       removeRemoteAudio(
         playerId
       );
@@ -1811,14 +1758,12 @@ function answerVoiceCall(
         playerId
       );
 
-
       removeRemoteAudio(
         playerId
       );
 
     }
   );
-
 }
 
 
@@ -1843,7 +1788,6 @@ function setupVoiceSystem() {
 
     }
   );
-
 }
 
 
@@ -1859,20 +1803,18 @@ function tryConnectVoice() {
 
 
   /*
-    Só preciso do meu microfone
-    ligado para TRANSMITIR.
-
-    Para RECEBER não preciso
-    do meu microfone.
+    Só preciso transmitir se:
+    - meu microfone está ligado
+    - o botão da partida está ON
   */
 
   if (
     !microphoneEnabled ||
-    !localStream
+    !localStream ||
+    !gameVoiceEnabled
   ) {
 
     return;
-
   }
 
 
@@ -1889,19 +1831,16 @@ function tryConnectVoice() {
       ) {
 
         return;
-
       }
 
 
       /*
-        Não verificamos mais
-        voiceStates do outro jogador.
+        Não verificamos o estado
+        do microfone do outro.
 
-        Se EU estou com o mic ligado,
-        eu envio para ele.
-
-        Mesmo que ele esteja
-        com o próprio mic desligado.
+        Eu consigo falar com ele
+        mesmo que ele esteja com
+        o próprio microfone desligado.
       */
 
       if (
@@ -1918,7 +1857,6 @@ function tryConnectVoice() {
 
     }
   );
-
 }
 
 
@@ -1930,7 +1868,7 @@ function startVoiceRetry() {
 
 
   voiceRetryUntil =
-    Date.now() + 8000;
+    Date.now() + 5000;
 
 
   if (
@@ -1938,7 +1876,6 @@ function startVoiceRetry() {
   ) {
 
     return;
-
   }
 
 
@@ -1958,22 +1895,18 @@ function startVoiceRetry() {
             voiceRetryTimer
           );
 
-
           voiceRetryTimer =
             null;
 
-
           return;
-
         }
 
 
         tryConnectVoice();
 
       },
-      700
+      500
     );
-
 }
 
 
@@ -1987,7 +1920,6 @@ function stopVoiceRetry() {
       voiceRetryTimer
     );
 
-
     voiceRetryTimer =
       null;
 
@@ -1996,7 +1928,6 @@ function stopVoiceRetry() {
 
   voiceRetryUntil =
     0;
-
 }
 
 
@@ -2052,10 +1983,6 @@ function setupHostConnection(
         Date.now()
       );
 
-
-      /* =====================
-         ENTRADA
-      ===================== */
 
       if (
         message.type ===
@@ -2119,13 +2046,8 @@ function setupHostConnection(
 
 
         return;
-
       }
 
-
-      /* =====================
-         SAÍDA
-      ===================== */
 
       if (
         message.type ===
@@ -2137,13 +2059,8 @@ function setupHostConnection(
         );
 
         return;
-
       }
 
-
-      /* =====================
-         HEARTBEAT
-      ===================== */
 
       if (
         message.type ===
@@ -2169,13 +2086,8 @@ function setupHostConnection(
 
 
         return;
-
       }
 
-
-      /* =====================
-         VOZ
-      ===================== */
 
       if (
         message.type ===
@@ -2187,9 +2099,7 @@ function setupHostConnection(
           message.enabled
         );
 
-
         return;
-
       }
 
     }
@@ -2218,7 +2128,6 @@ function setupHostConnection(
 
     }
   );
-
 }
 
 
@@ -2255,7 +2164,6 @@ function sendVoiceStatesTo(
 
     }
   );
-
 }
 
 
@@ -2266,7 +2174,6 @@ function removeHostConnection(
   hostConnections.delete(
     playerId
   );
-
 
   lastHeartbeat.delete(
     playerId
@@ -2292,7 +2199,6 @@ function removeHostConnection(
 
 
   broadcastPlayers();
-
 }
 
 
@@ -2377,7 +2283,6 @@ function startHostHeartbeat() {
       },
       3000
     );
-
 }
 
 
@@ -2391,12 +2296,9 @@ function stopHostHeartbeat() {
       heartbeatTimer
     );
 
-
     heartbeatTimer =
       null;
-
   }
-
 }
 
 
@@ -2437,7 +2339,6 @@ function startGuestHeartbeat() {
       },
       3000
     );
-
 }
 
 
@@ -2451,17 +2352,15 @@ function stopGuestHeartbeat() {
       guestHeartbeatTimer
     );
 
-
     guestHeartbeatTimer =
       null;
 
   }
-
 }
 
 
 /* =========================
-   JOGADORES
+   BROADCAST
 ========================= */
 
 function broadcastPlayers() {
@@ -2485,7 +2384,6 @@ function broadcastPlayers() {
   renderPlayers();
 
   updateStatus();
-
 }
 
 
@@ -2509,13 +2407,14 @@ createButton.addEventListener(
     isHost =
       true;
 
-
     gameStarted =
       false;
 
-
     leavingRoom =
       false;
+
+    gameVoiceEnabled =
+      true;
 
 
     roomCode =
@@ -2652,10 +2551,8 @@ createButton.addEventListener(
           peer =
             null;
 
-
           isHost =
             false;
-
 
           roomCode =
             "";
@@ -2667,7 +2564,6 @@ createButton.addEventListener(
 
 
           return;
-
         }
 
 
@@ -2684,7 +2580,7 @@ createButton.addEventListener(
 
 
 /* =========================
-   ENTRAR NA SALA
+   ENTRAR
 ========================= */
 
 joinButton.addEventListener(
@@ -2733,13 +2629,14 @@ joinButton.addEventListener(
     isHost =
       false;
 
-
     gameStarted =
       false;
 
-
     leavingRoom =
       false;
+
+    gameVoiceEnabled =
+      true;
 
 
     setStatus(
@@ -2815,10 +2712,6 @@ joinButton.addEventListener(
             }
 
 
-            /* =================
-               JOGADORES
-            ================= */
-
             if (
               message.type ===
               "players"
@@ -2888,13 +2781,8 @@ joinButton.addEventListener(
 
 
               return;
-
             }
 
-
-            /* =================
-               VOZ
-            ================= */
 
             if (
               message.type ===
@@ -2908,13 +2796,8 @@ joinButton.addEventListener(
 
 
               return;
-
             }
 
-
-            /* =================
-               HEARTBEAT
-            ================= */
 
             if (
               message.type ===
@@ -2934,7 +2817,6 @@ joinButton.addEventListener(
 
 
               return;
-
             }
 
 
@@ -2944,13 +2826,8 @@ joinButton.addEventListener(
             ) {
 
               return;
-
             }
 
-
-            /* =================
-               SALA CHEIA
-            ================= */
 
             if (
               message.type ===
@@ -2966,13 +2843,8 @@ joinButton.addEventListener(
 
 
               return;
-
             }
 
-
-            /* =================
-               HOST SAIU
-            ================= */
 
             if (
               message.type ===
@@ -2980,7 +2852,6 @@ joinButton.addEventListener(
             ) {
 
               players = [];
-
 
               voiceStates.clear();
 
@@ -3017,13 +2888,8 @@ joinButton.addEventListener(
 
 
               return;
-
             }
 
-
-            /* =================
-               COMEÇAR PARTIDA
-            ================= */
 
             if (
               message.type ===
@@ -3039,6 +2905,10 @@ joinButton.addEventListener(
                 players;
 
 
+              gameVoiceEnabled =
+                true;
+
+
               renderPlayers();
 
               updateStatus();
@@ -3048,7 +2918,6 @@ joinButton.addEventListener(
 
 
               return;
-
             }
 
           }
@@ -3069,7 +2938,6 @@ joinButton.addEventListener(
 
 
             players = [];
-
 
             voiceStates.clear();
 
@@ -3190,28 +3058,23 @@ function hideGameScreens() {
     "hidden"
   );
 
-
   referenceScreen.classList.add(
     "hidden"
   );
-
 
   recordScreen.classList.add(
     "hidden"
   );
 
-
   resultScreen.classList.add(
     "hidden"
   );
-
 }
 
 
 function startCountdown() {
 
   showGame();
-
 
   hideGameScreens();
 
@@ -3292,7 +3155,6 @@ function startCountdown() {
       },
       1000
     );
-
 }
 
 
@@ -3351,6 +3213,10 @@ function startGameForEveryone() {
     true;
 
 
+  gameVoiceEnabled =
+    true;
+
+
   sendToAll({
 
     type:
@@ -3363,7 +3229,6 @@ function startGameForEveryone() {
 
 
   startCountdown();
-
 }
 
 
@@ -3383,13 +3248,12 @@ startButton.addEventListener(
 
 
 /* =========================
-   SAIR DA SALA
+   SAIR
 ========================= */
 
 function closeAllVoice() {
 
   closeAllVoiceCalls();
-
 
   stopVoiceRetry();
 
@@ -3421,6 +3285,10 @@ function closeAllVoice() {
     false;
 
 
+  gameVoiceEnabled =
+    true;
+
+
   voiceStates.clear();
 
 
@@ -3441,6 +3309,8 @@ function closeAllVoice() {
   voiceStatus.textContent =
     "Microfone desligado";
 
+
+  updateGameVoiceButton();
 }
 
 
@@ -3546,7 +3416,6 @@ function leaveRoom() {
 
     renderPlayers();
 
-
     openHome();
 
 
@@ -3621,7 +3490,6 @@ function leaveRoom() {
 
   players = [];
 
-
   voiceStates.clear();
 
 
@@ -3639,13 +3507,11 @@ function leaveRoom() {
 
   renderPlayers();
 
-
   openHome();
 
 
   leavingRoom =
     false;
-
 }
 
 
@@ -3669,9 +3535,7 @@ logoutButton.addEventListener(
 
     leaveRoom();
 
-
     deleteAccount();
-
 
     openLogin();
 
