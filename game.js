@@ -21,6 +21,11 @@ const roomCodeElement = document.getElementById("roomCode");
 const statusElement = document.getElementById("status");
 const playersElement = document.getElementById("players");
 
+const micButton = document.getElementById("micButton");
+const voiceStatus = document.getElementById("voiceStatus");
+const remoteAudios = document.getElementById("remoteAudios");
+
+
 let peer = null;
 let hostConnection = null;
 
@@ -29,6 +34,11 @@ let myName = "";
 let roomCode = "";
 
 let players = [];
+
+let localStream = null;
+let microphoneEnabled = false;
+
+const activeCalls = new Map();
 
 const ACCOUNT_KEY = "shadow_games_account";
 
@@ -41,58 +51,86 @@ function cleanName(name) {
   return name.trim().slice(0, 16);
 }
 
+
 function saveAccount(name) {
+
   localStorage.setItem(
     ACCOUNT_KEY,
     JSON.stringify({
       name: name
     })
   );
+
 }
 
+
 function loadAccount() {
+
   try {
-    const saved = localStorage.getItem(ACCOUNT_KEY);
+
+    const saved =
+      localStorage.getItem(
+        ACCOUNT_KEY
+      );
 
     if (!saved) {
       return null;
     }
 
-    const account = JSON.parse(saved);
+    const account =
+      JSON.parse(saved);
 
     if (!account.name) {
       return null;
     }
 
-    return cleanName(account.name);
+    return cleanName(
+      account.name
+    );
 
   } catch (error) {
+
     return null;
+
   }
+
 }
+
 
 function deleteAccount() {
-  localStorage.removeItem(ACCOUNT_KEY);
+
+  localStorage.removeItem(
+    ACCOUNT_KEY
+  );
+
 }
 
+
 function openHome() {
+
   login.classList.add("hidden");
   room.classList.add("hidden");
   home.classList.remove("hidden");
 
-  profileName.textContent = myName;
+  profileName.textContent =
+    myName;
 
   profileAvatar.textContent =
     myName.charAt(0).toUpperCase();
+
 }
 
+
 function openLogin() {
+
   login.classList.remove("hidden");
   home.classList.add("hidden");
   room.classList.add("hidden");
 
   usernameInput.value = "";
+
   usernameInput.focus();
+
 }
 
 
@@ -100,22 +138,34 @@ function openLogin() {
    LOGIN
 ========================= */
 
-loginButton.addEventListener("click", () => {
+loginButton.addEventListener(
+  "click",
+  () => {
 
-  const name =
-    cleanName(usernameInput.value);
+    const name =
+      cleanName(
+        usernameInput.value
+      );
 
-  if (!name) {
-    alert("Digite um nome de usuário.");
-    return;
+    if (!name) {
+
+      alert(
+        "Digite um nome de usuário."
+      );
+
+      return;
+    }
+
+    myName = name;
+
+    saveAccount(
+      myName
+    );
+
+    openHome();
+
   }
-
-  myName = name;
-
-  saveAccount(myName);
-
-  openHome();
-});
+);
 
 
 usernameInput.addEventListener(
@@ -123,33 +173,11 @@ usernameInput.addEventListener(
   (event) => {
 
     if (event.key === "Enter") {
+
       loginButton.click();
+
     }
 
-  }
-);
-
-
-logoutButton.addEventListener(
-  "click",
-  () => {
-
-    if (peer) {
-      try {
-        peer.destroy();
-      } catch (error) {}
-    }
-
-    peer = null;
-    hostConnection = null;
-
-    isHost = false;
-    roomCode = "";
-    players = [];
-
-    deleteAccount();
-
-    openLogin();
   }
 );
 
@@ -158,11 +186,14 @@ logoutButton.addEventListener(
    INICIALIZAÇÃO
 ========================= */
 
-const savedName = loadAccount();
+const savedName =
+  loadAccount();
+
 
 if (savedName) {
 
-  myName = savedName;
+  myName =
+    savedName;
 
   openHome();
 
@@ -174,7 +205,7 @@ if (savedName) {
 
 
 /* =========================
-   SALA
+   CÓDIGO DA SALA
 ========================= */
 
 function generateRoomCode() {
@@ -186,74 +217,95 @@ function generateRoomCode() {
 
   for (let i = 0; i < 6; i++) {
 
-    code += chars[
-      Math.floor(
-        Math.random() * chars.length
-      )
-    ];
+    code +=
+      chars[
+        Math.floor(
+          Math.random() *
+          chars.length
+        )
+      ];
 
   }
 
   return code;
+
 }
 
 
 function setStatus(text) {
-  statusElement.textContent = text;
+
+  statusElement.textContent =
+    text;
+
 }
 
 
 function updateStatus() {
+
   setStatus(
     `${players.length}/5 jogadores`
   );
+
 }
 
 
 function escapeHTML(text) {
 
   const div =
-    document.createElement("div");
+    document.createElement(
+      "div"
+    );
 
-  div.textContent = text;
+  div.textContent =
+    text;
 
   return div.innerHTML;
+
 }
 
 
 function renderPlayers() {
 
-  playersElement.innerHTML = "";
+  playersElement.innerHTML =
+    "";
 
-  players.forEach((player) => {
+  players.forEach(
+    (player) => {
 
-    const element =
-      document.createElement("div");
+      const element =
+        document.createElement(
+          "div"
+        );
 
-    element.className = "player";
+      element.className =
+        "player";
 
-    const firstLetter =
-      player.name
-        .charAt(0)
-        .toUpperCase();
+      const firstLetter =
+        player.name
+          .charAt(0)
+          .toUpperCase();
 
-    element.innerHTML = `
-      <div class="avatar">
-        ${escapeHTML(firstLetter)}
-      </div>
+      element.innerHTML = `
+        <div class="avatar">
+          ${escapeHTML(firstLetter)}
+        </div>
 
-      <div class="player-name">
-        ${escapeHTML(player.name)}
-      </div>
+        <div class="player-name">
+          ${escapeHTML(player.name)}
+        </div>
 
-      <div class="player-status">
-        Online
-      </div>
-    `;
+        <div class="player-status">
+          Online
+        </div>
+      `;
 
-    playersElement.appendChild(element);
+      playersElement.appendChild(
+        element
+      );
 
-  });
+    }
+  );
+
 }
 
 
@@ -266,6 +318,7 @@ function showRoom() {
 
   roomCodeElement.textContent =
     roomCode.toUpperCase();
+
 }
 
 
@@ -275,10 +328,18 @@ function showHome() {
   login.classList.add("hidden");
 
   home.classList.remove("hidden");
+
 }
 
 
-function addPlayer(id, name) {
+/* =========================
+   JOGADORES
+========================= */
+
+function addPlayer(
+  id,
+  name
+) {
 
   const existing =
     players.find(
@@ -288,7 +349,8 @@ function addPlayer(id, name) {
 
   if (existing) {
 
-    existing.name = name;
+    existing.name =
+      name;
 
   } else {
 
@@ -301,6 +363,7 @@ function addPlayer(id, name) {
 
   renderPlayers();
   updateStatus();
+
 }
 
 
@@ -312,20 +375,588 @@ function removePlayer(id) {
         player.id !== id
     );
 
+  removeRemoteAudio(id);
+
+  closeVoiceCall(id);
+
   renderPlayers();
   updateStatus();
+
 }
 
 
 /* =========================
-   ENVIAR PARA TODOS
+   VOZ
 ========================= */
 
-function sendToAll(message) {
+async function enableMicrophone() {
 
-  if (!isHost || !peer) {
+  if (localStream) {
+
+    setMicrophoneState(
+      true
+    );
+
+    return;
+
+  }
+
+
+  if (
+    !navigator.mediaDevices ||
+    !navigator.mediaDevices.getUserMedia
+  ) {
+
+    voiceStatus.textContent =
+      "Microfone não suportado";
+
+    return;
+
+  }
+
+
+  try {
+
+    voiceStatus.textContent =
+      "Pedindo permissão...";
+
+    localStream =
+      await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: false
+      });
+
+
+    setMicrophoneState(
+      true
+    );
+
+
+    connectVoiceToPlayers();
+
+  } catch (error) {
+
+    console.error(
+      "Microfone:",
+      error
+    );
+
+    voiceStatus.textContent =
+      "Permissão negada";
+
+    microphoneEnabled =
+      false;
+
+    micButton.textContent =
+      "Ativar microfone";
+
+    micButton.classList.remove(
+      "active"
+    );
+
+  }
+
+}
+
+
+function setMicrophoneState(
+  enabled
+) {
+
+  microphoneEnabled =
+    enabled;
+
+
+  if (!localStream) {
     return;
   }
+
+
+  localStream
+    .getAudioTracks()
+    .forEach(
+      (track) => {
+
+        track.enabled =
+          enabled;
+
+      }
+    );
+
+
+  if (enabled) {
+
+    micButton.textContent =
+      "Desativar microfone";
+
+    micButton.classList.add(
+      "active"
+    );
+
+    micButton.classList.remove(
+      "disabled"
+    );
+
+    voiceStatus.textContent =
+      "Microfone ligado";
+
+  } else {
+
+    micButton.textContent =
+      "Ativar microfone";
+
+    micButton.classList.remove(
+      "active"
+    );
+
+    micButton.classList.add(
+      "disabled"
+    );
+
+    voiceStatus.textContent =
+      "Microfone desligado";
+
+  }
+
+}
+
+
+function disableMicrophone() {
+
+  if (!localStream) {
+    return;
+  }
+
+  setMicrophoneState(
+    false
+  );
+
+}
+
+
+micButton.addEventListener(
+  "click",
+  async () => {
+
+    if (
+      !localStream
+    ) {
+
+      await enableMicrophone();
+
+      return;
+
+    }
+
+    setMicrophoneState(
+      !microphoneEnabled
+    );
+
+  }
+);
+
+
+/* =========================
+   ÁUDIO DOS OUTROS
+========================= */
+
+function createRemoteAudio(
+  playerId,
+  stream
+) {
+
+  let audio =
+    document.getElementById(
+      `audio-${playerId}`
+    );
+
+
+  if (!audio) {
+
+    audio =
+      document.createElement(
+        "audio"
+      );
+
+    audio.id =
+      `audio-${playerId}`;
+
+    audio.autoplay =
+      true;
+
+    audio.playsInline =
+      true;
+
+    remoteAudios.appendChild(
+      audio
+    );
+
+  }
+
+
+  audio.srcObject =
+    stream;
+
+
+  const playPromise =
+    audio.play();
+
+
+  if (
+    playPromise &&
+    playPromise.catch
+  ) {
+
+    playPromise.catch(
+      () => {}
+    );
+
+  }
+
+}
+
+
+function removeRemoteAudio(
+  playerId
+) {
+
+  const audio =
+    document.getElementById(
+      `audio-${playerId}`
+    );
+
+  if (!audio) {
+    return;
+  }
+
+
+  try {
+
+    audio.pause();
+
+  } catch (error) {}
+
+
+  audio.srcObject =
+    null;
+
+  audio.remove();
+
+}
+
+
+function closeVoiceCall(
+  playerId
+) {
+
+  const call =
+    activeCalls.get(
+      playerId
+    );
+
+  if (!call) {
+    return;
+  }
+
+
+  try {
+
+    call.close();
+
+  } catch (error) {}
+
+
+  activeCalls.delete(
+    playerId
+  );
+
+}
+
+
+/* =========================
+   CHAMADA DE VOZ
+========================= */
+
+function callPlayer(
+  playerId
+) {
+
+  if (!peer) {
+    return;
+  }
+
+  if (!localStream) {
+    return;
+  }
+
+  if (
+    playerId === peer.id
+  ) {
+    return;
+  }
+
+  if (
+    activeCalls.has(
+      playerId
+    )
+  ) {
+    return;
+  }
+
+
+  const call =
+    peer.call(
+      playerId,
+      localStream
+    );
+
+
+  if (!call) {
+    return;
+  }
+
+
+  activeCalls.set(
+    playerId,
+    call
+  );
+
+
+  call.on(
+    "stream",
+    (stream) => {
+
+      createRemoteAudio(
+        playerId,
+        stream
+      );
+
+    }
+  );
+
+
+  call.on(
+    "close",
+    () => {
+
+      removeRemoteAudio(
+        playerId
+      );
+
+      activeCalls.delete(
+        playerId
+      );
+
+    }
+  );
+
+
+  call.on(
+    "error",
+    () => {
+
+      removeRemoteAudio(
+        playerId
+      );
+
+      activeCalls.delete(
+        playerId
+      );
+
+    }
+  );
+
+}
+
+
+function answerVoiceCall(
+  call
+) {
+
+  if (!localStream) {
+    return;
+  }
+
+
+  call.answer(
+    localStream
+  );
+
+
+  activeCalls.set(
+    call.peer,
+    call
+  );
+
+
+  call.on(
+    "stream",
+    (stream) => {
+
+      createRemoteAudio(
+        call.peer,
+        stream
+      );
+
+    }
+  );
+
+
+  call.on(
+    "close",
+    () => {
+
+      removeRemoteAudio(
+        call.peer
+      );
+
+      activeCalls.delete(
+        call.peer
+      );
+
+    }
+  );
+
+
+  call.on(
+    "error",
+    () => {
+
+      removeRemoteAudio(
+        call.peer
+      );
+
+      activeCalls.delete(
+        call.peer
+      );
+
+    }
+  );
+
+}
+
+
+function connectVoiceToPlayers() {
+
+  if (
+    !peer ||
+    !localStream
+  ) {
+    return;
+  }
+
+
+  players.forEach(
+    (player) => {
+
+      if (
+        player.id ===
+        peer.id
+      ) {
+        return;
+      }
+
+
+      /*
+        Somente o jogador com o ID
+        menor inicia a chamada.
+        Isso evita chamadas duplicadas.
+      */
+
+      if (
+        String(peer.id) <
+        String(player.id)
+      ) {
+
+        callPlayer(
+          player.id
+        );
+
+      }
+
+    }
+  );
+
+}
+
+
+/* =========================
+   CHAMADAS RECEBIDAS
+========================= */
+
+function setupVoiceSystem() {
+
+  if (!peer) {
+    return;
+  }
+
+
+  peer.on(
+    "call",
+    (call) => {
+
+      if (!localStream) {
+
+        /*
+          Ainda não ativou o microfone.
+          Pedimos o microfone para poder
+          responder à chamada.
+        */
+
+        enableMicrophone()
+          .then(
+            () => {
+
+              if (
+                localStream
+              ) {
+
+                answerVoiceCall(
+                  call
+                );
+
+              }
+
+            }
+          )
+          .catch(
+            () => {}
+          );
+
+        return;
+
+      }
+
+
+      answerVoiceCall(
+        call
+      );
+
+    }
+  );
+
+}
+
+
+/* =========================
+   CONEXÃO DE DADOS
+========================= */
+
+function sendToAll(
+  message
+) {
+
+  if (
+    !isHost ||
+    !peer
+  ) {
+    return;
+  }
+
 
   peer.connections.forEach(
     (list) => {
@@ -333,7 +964,9 @@ function sendToAll(message) {
       list.forEach(
         (connection) => {
 
-          if (connection.open) {
+          if (
+            connection.open
+          ) {
 
             connection.send(
               message
@@ -346,6 +979,7 @@ function sendToAll(message) {
 
     }
   );
+
 }
 
 
@@ -355,163 +989,20 @@ function broadcastPlayers() {
     return;
   }
 
+
   sendToAll({
     type: "players",
     players: players
   });
 
+
   renderPlayers();
   updateStatus();
+
+
+  connectVoiceToPlayers();
+
 }
-
-
-/* =========================
-   SAIR DA SALA
-========================= */
-
-function leaveRoom() {
-
-  if (!peer) {
-    showHome();
-    return;
-  }
-
-
-  if (isHost) {
-
-    sendToAll({
-      type: "host_left"
-    });
-
-    players = [];
-
-    renderPlayers();
-
-    try {
-      peer.destroy();
-    } catch (error) {}
-
-    peer = null;
-
-    isHost = false;
-    roomCode = "";
-
-    showHome();
-
-    return;
-  }
-
-
-  if (hostConnection) {
-
-    try {
-      hostConnection.close();
-    } catch (error) {}
-
-    hostConnection = null;
-  }
-
-
-  if (peer) {
-
-    try {
-      peer.destroy();
-    } catch (error) {}
-
-    peer = null;
-  }
-
-
-  players = [];
-
-  renderPlayers();
-
-  isHost = false;
-  roomCode = "";
-
-  showHome();
-}
-
-
-/* =========================
-   BOTÃO SAIR
-========================= */
-
-leaveRoomButton.addEventListener(
-  "click",
-  () => {
-
-    leaveRoom();
-
-  }
-);
-
-
-/* =========================
-   COPIAR CÓDIGO
-========================= */
-
-copyCodeButton.addEventListener(
-  "click",
-  async () => {
-
-    if (!roomCode) {
-      return;
-    }
-
-    try {
-
-      await navigator.clipboard.writeText(
-        roomCode.toUpperCase()
-      );
-
-      const oldText =
-        copyCodeButton.textContent;
-
-      copyCodeButton.textContent =
-        "Código copiado";
-
-      setTimeout(() => {
-
-        copyCodeButton.textContent =
-          oldText;
-
-      }, 1500);
-
-    } catch (error) {
-
-      const textArea =
-        document.createElement("textarea");
-
-      textArea.value =
-        roomCode.toUpperCase();
-
-      document.body.appendChild(
-        textArea
-      );
-
-      textArea.select();
-
-      document.execCommand(
-        "copy"
-      );
-
-      textArea.remove();
-
-      copyCodeButton.textContent =
-        "Código copiado";
-
-      setTimeout(() => {
-
-        copyCodeButton.textContent =
-          "Copiar código";
-
-      }, 1500);
-
-    }
-
-  }
-);
 
 
 /* =========================
@@ -535,10 +1026,13 @@ function setupHostConnection(
 
 
       if (
-        message.type === "join"
+        message.type ===
+        "join"
       ) {
 
-        if (players.length >= 5) {
+        if (
+          players.length >= 5
+        ) {
 
           connection.send({
             type: "room_full"
@@ -547,6 +1041,7 @@ function setupHostConnection(
           connection.close();
 
           return;
+
         }
 
 
@@ -596,6 +1091,7 @@ function setupHostConnection(
 
     }
   );
+
 }
 
 
@@ -608,12 +1104,16 @@ createButton.addEventListener(
   () => {
 
     if (!myName) {
+
       openLogin();
+
       return;
+
     }
 
 
     isHost = true;
+
 
     roomCode =
       generateRoomCode();
@@ -633,23 +1133,37 @@ createButton.addEventListener(
 
 
     peer =
-      new Peer(roomCode);
+      new Peer(
+        roomCode
+      );
+
+
+    setupVoiceSystem();
 
 
     peer.on(
       "open",
       (id) => {
 
-        roomCode = id;
+        roomCode =
+          id;
 
         showRoom();
+
 
         startButton.style.display =
           "block";
 
-        renderPlayers();
 
+        renderPlayers();
         updateStatus();
+
+
+        /*
+          A voz só começa quando
+          o jogador apertar o botão
+          do microfone.
+        */
 
       }
     );
@@ -695,7 +1209,9 @@ createButton.addEventListener(
       "error",
       (error) => {
 
-        console.error(error);
+        console.error(
+          error
+        );
 
 
         if (
@@ -709,7 +1225,9 @@ createButton.addEventListener(
 
 
           try {
+
             peer.destroy();
+
           } catch (e) {}
 
 
@@ -724,6 +1242,7 @@ createButton.addEventListener(
           );
 
           return;
+
         }
 
 
@@ -748,8 +1267,11 @@ joinButton.addEventListener(
   () => {
 
     if (!myName) {
+
       openLogin();
+
       return;
+
     }
 
 
@@ -770,13 +1292,16 @@ joinButton.addEventListener(
         .toLowerCase();
 
 
-    if (roomCode.length !== 6) {
+    if (
+      roomCode.length !== 6
+    ) {
 
       alert(
         "O código precisa ter 6 caracteres."
       );
 
       return;
+
     }
 
 
@@ -790,6 +1315,9 @@ joinButton.addEventListener(
 
     peer =
       new Peer();
+
+
+    setupVoiceSystem();
 
 
     peer.on(
@@ -848,11 +1376,15 @@ joinButton.addEventListener(
             ) {
 
               players =
-                message.players || [];
+                message.players ||
+                [];
+
 
               renderPlayers();
-
               updateStatus();
+
+
+              connectVoiceToPlayers();
 
             }
 
@@ -868,7 +1400,9 @@ joinButton.addEventListener(
 
 
               try {
+
                 peer.destroy();
+
               } catch (e) {}
 
 
@@ -886,13 +1420,19 @@ joinButton.addEventListener(
 
               renderPlayers();
 
+
               setStatus(
                 "O dono da sala saiu."
               );
 
 
+              closeAllVoice();
+
+
               try {
+
                 peer.destroy();
+
               } catch (e) {}
 
 
@@ -931,9 +1471,13 @@ joinButton.addEventListener(
 
             renderPlayers();
 
+
             setStatus(
               "O dono da sala saiu."
             );
+
+
+            closeAllVoice();
 
 
             hostConnection =
@@ -943,7 +1487,9 @@ joinButton.addEventListener(
             if (peer) {
 
               try {
+
                 peer.destroy();
+
               } catch (e) {}
 
             }
@@ -962,6 +1508,7 @@ joinButton.addEventListener(
             players = [];
 
             renderPlayers();
+
 
             setStatus(
               "Conexão perdida."
@@ -986,6 +1533,7 @@ joinButton.addEventListener(
 
         renderPlayers();
 
+
         setStatus(
           "Conexão perdida."
         );
@@ -1002,6 +1550,7 @@ joinButton.addEventListener(
 
         renderPlayers();
 
+
         setStatus(
           "Sala encerrada."
         );
@@ -1014,7 +1563,9 @@ joinButton.addEventListener(
       "error",
       (error) => {
 
-        console.error(error);
+        console.error(
+          error
+        );
 
 
         if (
@@ -1040,12 +1591,311 @@ joinButton.addEventListener(
 
         renderPlayers();
 
+
         setStatus(
           "Não foi possível entrar."
         );
 
       }
     );
+
+  }
+);
+
+
+/* =========================
+   SAIR DA SALA
+========================= */
+
+function closeAllVoice() {
+
+  activeCalls.forEach(
+    (call) => {
+
+      try {
+
+        call.close();
+
+      } catch (error) {}
+
+    }
+  );
+
+
+  activeCalls.clear();
+
+
+  remoteAudios.innerHTML =
+    "";
+
+
+  if (localStream) {
+
+    localStream
+      .getTracks()
+      .forEach(
+        (track) => {
+
+          try {
+
+            track.stop();
+
+          } catch (error) {}
+
+        }
+      );
+
+  }
+
+
+  localStream =
+    null;
+
+  microphoneEnabled =
+    false;
+
+
+  micButton.textContent =
+    "Ativar microfone";
+
+  micButton.classList.remove(
+    "active"
+  );
+
+  micButton.classList.remove(
+    "disabled"
+  );
+
+  voiceStatus.textContent =
+    "Microfone desligado";
+
+}
+
+
+function leaveRoom() {
+
+  closeAllVoice();
+
+
+  if (!peer) {
+
+    showHome();
+
+    return;
+
+  }
+
+
+  if (isHost) {
+
+    sendToAll({
+      type: "host_left"
+    });
+
+
+    players = [];
+
+    renderPlayers();
+
+
+    try {
+
+      peer.destroy();
+
+    } catch (error) {}
+
+
+    peer = null;
+
+    isHost = false;
+
+    roomCode = "";
+
+
+    showHome();
+
+    return;
+
+  }
+
+
+  if (hostConnection) {
+
+    try {
+
+      hostConnection.close();
+
+    } catch (error) {}
+
+
+    hostConnection =
+      null;
+
+  }
+
+
+  if (peer) {
+
+    try {
+
+      peer.destroy();
+
+    } catch (error) {}
+
+    peer = null;
+
+  }
+
+
+  players = [];
+
+  renderPlayers();
+
+
+  isHost = false;
+
+  roomCode = "";
+
+
+  showHome();
+
+}
+
+
+leaveRoomButton.addEventListener(
+  "click",
+  () => {
+
+    leaveRoom();
+
+  }
+);
+
+
+/* =========================
+   TROCAR CONTA
+========================= */
+
+logoutButton.addEventListener(
+  "click",
+  () => {
+
+    closeAllVoice();
+
+
+    if (peer) {
+
+      try {
+
+        peer.destroy();
+
+      } catch (error) {}
+
+    }
+
+
+    peer = null;
+
+    hostConnection =
+      null;
+
+    isHost = false;
+
+    roomCode = "";
+
+    players = [];
+
+
+    deleteAccount();
+
+
+    openLogin();
+
+  }
+);
+
+
+/* =========================
+   COPIAR CÓDIGO
+========================= */
+
+copyCodeButton.addEventListener(
+  "click",
+  async () => {
+
+    if (!roomCode) {
+      return;
+    }
+
+
+    try {
+
+      await navigator.clipboard.writeText(
+        roomCode.toUpperCase()
+      );
+
+
+      const oldText =
+        copyCodeButton.textContent;
+
+
+      copyCodeButton.textContent =
+        "Código copiado";
+
+
+      setTimeout(
+        () => {
+
+          copyCodeButton.textContent =
+            oldText;
+
+        },
+        1500
+      );
+
+    } catch (error) {
+
+      const textArea =
+        document.createElement(
+          "textarea"
+        );
+
+
+      textArea.value =
+        roomCode.toUpperCase();
+
+
+      document.body.appendChild(
+        textArea
+      );
+
+
+      textArea.select();
+
+
+      document.execCommand(
+        "copy"
+      );
+
+
+      textArea.remove();
+
+
+      copyCodeButton.textContent =
+        "Código copiado";
+
+
+      setTimeout(
+        () => {
+
+          copyCodeButton.textContent =
+            "Copiar código";
+
+        },
+        1500
+      );
+
+    }
 
   }
 );
