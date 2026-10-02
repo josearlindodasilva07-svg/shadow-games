@@ -12,6 +12,7 @@ const playersElement = document.getElementById("players");
 
 let peer = null;
 let hostConnection = null;
+
 let isHost = false;
 let myName = "";
 let roomCode = "";
@@ -40,6 +41,20 @@ function showRoom() {
   roomCodeElement.textContent = roomCode.toUpperCase();
 }
 
+function setStatus(text) {
+  statusElement.textContent = text;
+}
+
+function updateStatus() {
+  setStatus(`${players.length}/5 jogadores`);
+}
+
+function escapeHTML(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 function renderPlayers() {
   playersElement.innerHTML = "";
 
@@ -48,13 +63,12 @@ function renderPlayers() {
 
     element.className = "player";
 
-    const firstLetter = player.name
-      .charAt(0)
-      .toUpperCase();
+    const firstLetter =
+      player.name.charAt(0).toUpperCase();
 
     element.innerHTML = `
-      <div class="avatar">${firstLetter}</div>
-      <div class="player-name">${player.name}</div>
+      <div class="avatar">${escapeHTML(firstLetter)}</div>
+      <div class="player-name">${escapeHTML(player.name)}</div>
       <div class="player-status">Online</div>
     `;
 
@@ -62,12 +76,35 @@ function renderPlayers() {
   });
 }
 
-function setStatus(text) {
-  statusElement.textContent = text;
+function addPlayer(id, name) {
+  const existing = players.find(
+    (player) => player.id === id
+  );
+
+  if (existing) {
+    existing.name = name;
+  } else {
+    players.push({
+      id: id,
+      name: name
+    });
+  }
+
+  renderPlayers();
+  updateStatus();
+}
+
+function removePlayer(id) {
+  players = players.filter(
+    (player) => player.id !== id
+  );
+
+  renderPlayers();
+  updateStatus();
 }
 
 function sendToAll(message) {
-  if (!isHost) return;
+  if (!isHost || !peer) return;
 
   peer.connections.forEach((connectionList) => {
     connectionList.forEach((connection) => {
@@ -85,64 +122,52 @@ function broadcastPlayers() {
     type: "players",
     players: players
   });
-}
-
-function addPlayer(id, name) {
-  const existing = players.find((player) => player.id === id);
-
-  if (existing) {
-    existing.name = name;
-  } else {
-    players.push({
-      id: id,
-      name: name
-    });
-  }
 
   renderPlayers();
-}
-
-function removePlayer(id) {
-  players = players.filter((player) => player.id !== id);
-
-  renderPlayers();
+  updateStatus();
 }
 
 function setupHostConnection(connection) {
   connection.on("open", () => {
-    connection.on("data", (message) => {
-      if (!message || !message.type) return;
+    console.log("Jogador conectado:", connection.peer);
+  });
 
-      if (message.type === "join") {
-        addPlayer(connection.peer, message.name);
+  connection.on("data", (message) => {
+    if (!message || !message.type) return;
 
+    if (message.type === "join") {
+      if (players.length >= 5) {
         connection.send({
-          type: "players",
-          players: players
+          type: "room_full"
         });
 
-        broadcastPlayers();
-
-        setStatus(`${players.length}/5 jogadores`);
+        connection.close();
+        return;
       }
 
-      if (message.type === "ping") {
-        connection.send({
-          type: "pong"
-        });
-      }
-    });
+      addPlayer(
+        connection.peer,
+        message.name
+      );
+
+      connection.send({
+        type: "players",
+        players: players
+      });
+
+      broadcastPlayers();
+    }
   });
 
   connection.on("close", () => {
     removePlayer(connection.peer);
-    broadcastPlayers();
 
-    setStatus(`${players.length}/5 jogadores`);
+    broadcastPlayers();
   });
 
   connection.on("error", () => {
     removePlayer(connection.peer);
+
     broadcastPlayers();
   });
 }
@@ -172,15 +197,13 @@ createButton.addEventListener("click", () => {
   peer.on("open", (id) => {
     roomCode = id;
 
-    roomCodeElement.textContent = roomCode.toUpperCase();
-
     showRoom();
 
     startButton.style.display = "block";
 
     renderPlayers();
 
-    setStatus("Sala criada. Aguardando jogadores...");
+    updateStatus();
   });
 
   peer.on("connection", (connection) => {
@@ -193,15 +216,14 @@ createButton.addEventListener("click", () => {
     if (error.type === "unavailable-id") {
       alert("Esse código já está sendo usado. Crie outra sala.");
 
-      if (peer) {
-        peer.destroy();
-      }
+      peer.destroy();
 
-      isHost = false;
       peer = null;
+      isHost = false;
       roomCode = "";
 
       setStatus("Erro ao criar sala.");
+
       return;
     }
 
@@ -259,8 +281,15 @@ joinButton.addEventListener("click", () => {
         players = message.players || [];
 
         renderPlayers();
+        updateStatus();
+      }
 
-        setStatus(`${players.length}/5 jogadores`);
+      if (message.type === "room_full") {
+        alert("A sala está cheia.");
+
+        peer.destroy();
+
+        location.reload();
       }
 
       if (message.type === "start_game") {
