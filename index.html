@@ -1,310 +1,291 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <title>Shadow Games</title>
-
   <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-  <main class="app">
+<main class="app">
 
-    <!-- LOGIN -->
+  <section id="login">
 
-    <section id="login">
+    <div class="logo">
+      SHADOW
+      <span>GAMES</span>
+    </div>
 
-      <div class="logo">
-        SHADOW
-        <span>GAMES</span>
+    <p class="subtitle">Entre para continuar</p>
+
+    <input
+      id="username"
+      maxlength="16"
+      autocomplete="off"
+      placeholder="Nome de usuário"
+    >
+
+    <button id="loginButton">
+      Entrar
+    </button>
+
+  </section>
+
+
+  <section id="home" class="hidden">
+
+    <div class="profile">
+
+      <div id="profileAvatar" class="avatar"></div>
+
+      <div>
+        <div class="profile-label">Jogando como</div>
+        <div id="profileName" class="profile-name">-</div>
       </div>
 
-      <p class="subtitle">
-        Entre para continuar
-      </p>
+    </div>
 
-      <input
-        id="username"
-        maxlength="16"
-        autocomplete="off"
-        placeholder="Nome de usuário"
-      >
+    <h1>Shadow Games</h1>
+    <p>Party game multiplayer</p>
 
-      <button id="loginButton">
-        Entrar
-      </button>
+    <button id="create">Criar sala</button>
 
-    </section>
+    <button id="join">Entrar em sala</button>
+
+    <button id="logout" class="secondary">
+      Trocar conta
+    </button>
+
+  </section>
 
 
-    <!-- MENU -->
+  <section id="room" class="hidden">
 
-    <section id="home" class="hidden">
+    <h2>Sala</h2>
 
-      <div class="profile">
+    <div class="code">
+      <span>Código da sala</span>
+      <strong id="roomCode">------</strong>
+    </div>
 
-        <div id="profileAvatar" class="avatar"></div>
+    <button id="copyCode" class="secondary">
+      Copiar código
+    </button>
 
-        <div>
 
-          <div class="profile-label">
-            Jogando como
-          </div>
+    <div class="voice-panel">
 
-          <div id="profileName" class="profile-name">
-            -
-          </div>
+      <div class="voice-info">
 
+        <div class="voice-title">Voz</div>
+
+        <div id="voiceStatus" class="voice-status">
+          Microfone desligado
         </div>
 
       </div>
 
-
-      <h1>Shadow Games</h1>
-
-      <p>
-        Party game multiplayer
-      </p>
-
-
-      <button id="create">
-        Criar sala
+      <button
+        id="micButton"
+        class="mic-button"
+        type="button"
+      >
+        Ativar microfone
       </button>
 
-      <button id="join">
-        Entrar em sala
-      </button>
-
-      <button id="logout" class="secondary">
-        Trocar conta
-      </button>
-
-    </section>
+    </div>
 
 
-    <!-- SALA -->
+    <p id="status">
+      Aguardando...
+    </p>
 
-    <section id="room" class="hidden">
+    <div id="players"></div>
 
-      <h2>Sala</h2>
+    <div id="remoteAudios"></div>
+
+    <button id="start">
+      Começar partida
+    </button>
+
+    <button id="leaveRoom" class="secondary">
+      Sair da sala
+    </button>
+
+  </section>
 
 
-      <div class="code">
+  <section id="game" class="hidden">
 
-        <span>
-          Código da sala
-        </span>
+    <div class="game-header">
 
-        <strong id="roomCode">
-          ------
-        </strong>
+      <div>
+        <div class="game-label">SHADOW GAMES</div>
 
+        <div id="roundText" class="round-text">
+          Rodada 1
+        </div>
       </div>
 
+      <div class="game-actions">
 
-      <button id="copyCode" class="secondary">
-        Copiar código
-      </button>
-
-
-      <!-- VOZ -->
-
-      <div class="voice-panel">
-
-        <div class="voice-info">
-
-          <div class="voice-title">
-            Voz
-          </div>
-
-          <div id="voiceStatus" class="voice-status">
-            Microfone desligado
-          </div>
-
+        <div
+          id="gamePlayers"
+          class="game-players"
+        >
+          0/5
         </div>
 
         <button
-          id="micButton"
-          class="mic-button"
+          id="gameVoiceButton"
           type="button"
         >
-          Ativar microfone
+          Voz: OFF
         </button>
 
       </div>
 
+    </div>
 
-      <p id="status">
-        Conectando...
+
+    <div
+      id="countdownScreen"
+      class="game-center"
+    >
+
+      <div class="countdown-label">
+        PREPARE-SE
+      </div>
+
+      <div
+        id="countdownNumber"
+        class="countdown-number"
+      >
+        3
+      </div>
+
+    </div>
+
+
+    <div
+      id="referenceScreen"
+      class="game-center hidden"
+    >
+
+      <div class="game-label">
+        OUÇA
+      </div>
+
+      <h2>Som de referência</h2>
+
+      <p>
+        Todos vão ouvir o mesmo som.
       </p>
 
-
-      <div id="players"></div>
-
-
-      <div id="remoteAudios"></div>
-
-
-      <button id="start">
-        Começar partida
+      <button id="referenceButton">
+        Reproduzir som
       </button>
 
-
-      <button
-        id="leaveRoom"
-        class="secondary"
-      >
-        Sair da sala
-      </button>
-
-    </section>
+    </div>
 
 
-    <!-- PARTIDA -->
+    <div
+      id="recordScreen"
+      class="game-center hidden"
+    >
 
-    <section id="game" class="hidden">
-
-      <div class="game-header">
-
-        <div>
-
-          <div class="game-label">
-            SHADOW GAMES
-          </div>
-
-          <div id="roundText" class="round-text">
-            Rodada 1
-          </div>
-
-        </div>
-
-        <div class="game-actions">
-
-          <div
-            id="gamePlayers"
-            class="game-players"
-          >
-            0/5
-          </div>
-
-        </div>
-
+      <div class="game-label">
+        SUA VEZ
       </div>
 
-
-      <!-- CONTAGEM -->
+      <h2>Faça o som</h2>
 
       <div
-        id="countdownScreen"
-        class="game-center"
+        id="recordTimer"
+        class="record-timer"
       >
-
-        <div class="countdown-label">
-          PREPARE-SE
-        </div>
-
-        <div
-          id="countdownNumber"
-          class="countdown-number"
-        >
-          3
-        </div>
-
+        5
       </div>
-
-
-      <!-- REFERÊNCIA -->
 
       <div
-        id="referenceScreen"
-        class="game-center hidden"
+        id="recordStatus"
+        class="record-status"
       >
-
-        <div class="game-label">
-          OUÇA
-        </div>
-
-        <h2>
-          Som de referência
-        </h2>
-
-        <p>
-          Todos vão ouvir o mesmo som.
-        </p>
-
-        <button id="referenceButton">
-          Reproduzir som
-        </button>
-
+        Preparando...
       </div>
 
+    </div>
 
-      <!-- GRAVAÇÃO -->
+
+    <div
+      id="playbackScreen"
+      class="game-center hidden"
+    >
+
+      <div class="game-label">
+        OUVINDO
+      </div>
+
+      <h2 id="playbackName">
+        Jogador
+      </h2>
 
       <div
-        id="recordScreen"
-        class="game-center hidden"
+        id="playbackStatus"
+        class="record-status"
       >
-
-        <div class="game-label">
-          SUA VEZ
-        </div>
-
-        <h2>
-          Faça o som
-        </h2>
-
-        <div
-          id="recordTimer"
-          class="record-timer"
-        >
-          5
-        </div>
-
-        <div
-          id="recordStatus"
-          class="record-status"
-        >
-          Preparando...
-        </div>
-
+        Reproduzindo...
       </div>
 
+    </div>
 
-      <!-- RESULTADO -->
 
-      <div
-        id="resultScreen"
-        class="game-center hidden"
-      >
+    <div
+      id="wheelScreen"
+      class="game-center hidden"
+    >
 
-        <div class="game-label">
-          RESULTADO
-        </div>
-
-        <h2>
-          Rodada concluída
-        </h2>
-
-        <p id="resultText">
-          Preparando resultado...
-        </p>
-
+      <div class="game-label">
+        RODA
       </div>
 
-    </section>
+      <div id="wheel">
+        RODA
+      </div>
 
-  </main>
+      <h2 id="wheelResult">
+        Sorteando...
+      </h2>
+
+    </div>
 
 
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <div
+      id="resultScreen"
+      class="game-center hidden"
+    >
 
-  <script src="game.js"></script>
+      <div class="game-label">
+        RESULTADO
+      </div>
+
+      <h2>Rodada concluída</h2>
+
+      <p id="resultText">
+        Preparando resultado...
+      </p>
+
+    </div>
+
+  </section>
+
+</main>
+
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="game.js"></script>
 
 </body>
-
 </html>
