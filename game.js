@@ -57,22 +57,35 @@ const resultText =
   document.getElementById("resultText");
 
 
+/* =========================
+   ESTADO
+========================= */
+
 let peer = null;
 let hostConnection = null;
 
 let isHost = false;
 
 let myName = "";
-
 let roomCode = "";
 
 let players = [];
 
 let localStream = null;
-
 let microphoneEnabled = false;
 
+let gameStarted = false;
+
+let countdownTimer = null;
+
+let heartbeatTimer = null;
+let heartbeatTimeoutTimer = null;
+
 const activeCalls = new Map();
+
+const hostConnections = new Map();
+
+const lastHeartbeat = new Map();
 
 const ACCOUNT_KEY =
   "shadow_games_account";
@@ -145,6 +158,10 @@ function deleteAccount() {
 }
 
 
+/* =========================
+   TELAS
+========================= */
+
 function openHome() {
 
   login.classList.add("hidden");
@@ -174,7 +191,36 @@ function openLogin() {
 
   usernameInput.value = "";
 
-  usernameInput.focus();
+}
+
+
+function showRoom() {
+
+  login.classList.add("hidden");
+  home.classList.add("hidden");
+  game.classList.add("hidden");
+
+  room.classList.remove("hidden");
+
+  roomCodeElement.textContent =
+    roomCode.toUpperCase();
+
+}
+
+
+function showGame() {
+
+  login.classList.add("hidden");
+  home.classList.add("hidden");
+  room.classList.add("hidden");
+
+  game.classList.remove("hidden");
+
+  gamePlayers.textContent =
+    `${players.length}/5`;
+
+  roundText.textContent =
+    "Rodada 1";
 
 }
 
@@ -202,12 +248,9 @@ loginButton.addEventListener(
 
     }
 
-    myName =
-      name;
+    myName = name;
 
-    saveAccount(
-      myName
-    );
+    saveAccount(myName);
 
     openHome();
 
@@ -219,10 +262,7 @@ usernameInput.addEventListener(
   "keydown",
   (event) => {
 
-    if (
-      event.key ===
-      "Enter"
-    ) {
+    if (event.key === "Enter") {
 
       loginButton.click();
 
@@ -231,10 +271,6 @@ usernameInput.addEventListener(
   }
 );
 
-
-/* =========================
-   INICIALIZAÇÃO
-========================= */
 
 const savedName =
   loadAccount();
@@ -255,7 +291,7 @@ if (savedName) {
 
 
 /* =========================
-   SALA
+   UTILIDADES
 ========================= */
 
 function generateRoomCode() {
@@ -263,14 +299,9 @@ function generateRoomCode() {
   const chars =
     "abcdefghijklmnopqrstuvwxyz";
 
-  let code =
-    "";
+  let code = "";
 
-  for (
-    let i = 0;
-    i < 6;
-    i++
-  ) {
+  for (let i = 0; i < 6; i++) {
 
     code +=
       chars[
@@ -297,12 +328,15 @@ function setStatus(text) {
 
 function updateStatus() {
 
+  const count =
+    players.length;
+
   setStatus(
-    `${players.length}/5 jogadores`
+    `${count}/5 jogadores`
   );
 
   gamePlayers.textContent =
-    `${players.length}/5`;
+    `${count}/5`;
 
 }
 
@@ -318,6 +352,62 @@ function escapeHTML(text) {
     text;
 
   return div.innerHTML;
+
+}
+
+
+/* =========================
+   JOGADORES
+========================= */
+
+function addPlayer(
+  id,
+  name
+) {
+
+  const existing =
+    players.find(
+      (player) =>
+        player.id === id
+    );
+
+  if (existing) {
+
+    existing.name =
+      name;
+
+  } else {
+
+    players.push({
+      id: id,
+      name: name
+    });
+
+  }
+
+  renderPlayers();
+  updateStatus();
+
+}
+
+
+function removePlayer(id) {
+
+  if (!id) {
+    return;
+  }
+
+  players =
+    players.filter(
+      (player) =>
+        player.id !== id
+    );
+
+  removeRemoteAudio(id);
+  closeVoiceCall(id);
+
+  renderPlayers();
+  updateStatus();
 
 }
 
@@ -367,258 +457,36 @@ function renderPlayers() {
 }
 
 
-function showRoom() {
-
-  home.classList.add("hidden");
-  login.classList.add("hidden");
-  game.classList.add("hidden");
-
-  room.classList.remove("hidden");
-
-  roomCodeElement.textContent =
-    roomCode.toUpperCase();
-
-}
-
-
-function showHome() {
-
-  room.classList.add("hidden");
-  login.classList.add("hidden");
-  game.classList.add("hidden");
-
-  home.classList.remove("hidden");
-
-}
-
-
 /* =========================
-   PARTIDA
+   ENVIAR PARA TODOS
 ========================= */
 
-function showGame() {
-
-  login.classList.add("hidden");
-  home.classList.add("hidden");
-  room.classList.add("hidden");
-
-  game.classList.remove("hidden");
-
-  gamePlayers.textContent =
-    `${players.length}/5`;
-
-  roundText.textContent =
-    "Rodada 1";
-
-}
-
-
-function hideGameScreens() {
-
-  countdownScreen.classList.add(
-    "hidden"
-  );
-
-  referenceScreen.classList.add(
-    "hidden"
-  );
-
-  recordScreen.classList.add(
-    "hidden"
-  );
-
-  resultScreen.classList.add(
-    "hidden"
-  );
-
-}
-
-
-function startCountdown() {
-
-  showGame();
-
-  hideGameScreens();
-
-  countdownScreen.classList.remove(
-    "hidden"
-  );
-
-
-  let number =
-    3;
-
-
-  countdownNumber.textContent =
-    number;
-
-
-  const timer =
-    setInterval(
-      () => {
-
-        number--;
-
-        if (number > 0) {
-
-          countdownNumber.textContent =
-            number;
-
-          return;
-
-        }
-
-
-        clearInterval(
-          timer
-        );
-
-
-        countdownNumber.textContent =
-          "GO!";
-
-
-        setTimeout(
-          () => {
-
-            countdownScreen.classList.add(
-              "hidden"
-            );
-
-            referenceScreen.classList.remove(
-              "hidden"
-            );
-
-          },
-          700
-        );
-
-      },
-      1000
-    );
-
-}
-
-
-function startGameForEveryone() {
+function sendToAll(message) {
 
   if (!isHost) {
     return;
   }
 
+  hostConnections.forEach(
+    (connection) => {
 
-  sendToAll({
-    type: "game_start",
-    players: players
-  });
+      if (
+        connection &&
+        connection.open
+      ) {
 
+        try {
 
-  startCountdown();
+          connection.send(
+            message
+          );
 
-}
+        } catch (error) {}
 
+      }
 
-function showReferenceScreen() {
-
-  hideGameScreens();
-
-  referenceScreen.classList.remove(
-    "hidden"
+    }
   );
-
-}
-
-
-function showRecordScreen() {
-
-  hideGameScreens();
-
-  recordScreen.classList.remove(
-    "hidden"
-  );
-
-  recordTimer.textContent =
-    "5";
-
-  recordStatus.textContent =
-    "Preparando...";
-
-}
-
-
-function showResultScreen() {
-
-  hideGameScreens();
-
-  resultScreen.classList.remove(
-    "hidden"
-  );
-
-  resultText.textContent =
-    "Preparando resultado...";
-
-}
-
-
-/* =========================
-   JOGADORES
-========================= */
-
-function addPlayer(
-  id,
-  name
-) {
-
-  const existing =
-    players.find(
-      (player) =>
-        player.id === id
-    );
-
-
-  if (existing) {
-
-    existing.name =
-      name;
-
-  } else {
-
-    players.push({
-      id: id,
-      name: name
-    });
-
-  }
-
-
-  renderPlayers();
-
-  updateStatus();
-
-}
-
-
-function removePlayer(id) {
-
-  players =
-    players.filter(
-      (player) =>
-        player.id !== id
-    );
-
-
-  removeRemoteAudio(
-    id
-  );
-
-  closeVoiceCall(
-    id
-  );
-
-
-  renderPlayers();
-
-  updateStatus();
 
 }
 
@@ -627,13 +495,27 @@ function removePlayer(id) {
    VOZ
 ========================= */
 
+/*
+  IMPORTANTE:
+
+  Nunca pedimos o microfone
+  automaticamente.
+
+  Se o jogador não ativou o
+  microfone, ele pode receber
+  áudio, mas não transmite.
+*/
+
+
 async function enableMicrophone() {
 
   if (localStream) {
 
-    setMicrophoneState(
-      true
-    );
+    setMicrophoneState(true);
+
+    announceVoiceState(true);
+
+    reconnectVoice();
 
     return;
 
@@ -659,7 +541,7 @@ async function enableMicrophone() {
       "Pedindo permissão...";
 
 
-    localStream =
+    const stream =
       await navigator.mediaDevices
         .getUserMedia({
           audio: {
@@ -671,26 +553,23 @@ async function enableMicrophone() {
         });
 
 
-    setMicrophoneState(
-      true
-    );
+    localStream =
+      stream;
 
 
-    connectVoiceToPlayers();
+    setMicrophoneState(true);
+
+    announceVoiceState(true);
+
+    reconnectVoice();
 
   } catch (error) {
 
-    console.error(
-      "Microfone:",
-      error
-    );
-
-
-    voiceStatus.textContent =
-      "Permissão negada";
-
     microphoneEnabled =
       false;
+
+    voiceStatus.textContent =
+      "Microfone não autorizado";
 
     micButton.textContent =
       "Ativar microfone";
@@ -713,7 +592,14 @@ function setMicrophoneState(
 
 
   if (!localStream) {
+
+    micButton.textContent =
+      enabled
+        ? "Desativar microfone"
+        : "Ativar microfone";
+
     return;
+
   }
 
 
@@ -766,6 +652,22 @@ function setMicrophoneState(
 }
 
 
+function disableMicrophone() {
+
+  if (!localStream) {
+    return;
+  }
+
+
+  setMicrophoneState(false);
+
+  announceVoiceState(false);
+
+  reconnectVoice();
+
+}
+
+
 micButton.addEventListener(
   "click",
   async () => {
@@ -779,12 +681,106 @@ micButton.addEventListener(
     }
 
 
-    setMicrophoneState(
-      !microphoneEnabled
-    );
+    if (microphoneEnabled) {
+
+      disableMicrophone();
+
+    } else {
+
+      setMicrophoneState(true);
+
+      announceVoiceState(true);
+
+      reconnectVoice();
+
+    }
 
   }
 );
+
+
+/* =========================
+   ESTADO DA VOZ
+========================= */
+
+function announceVoiceState(
+  enabled
+) {
+
+  const message = {
+    type: "voice_state",
+    playerId: peer
+      ? peer.id
+      : "",
+    enabled: enabled
+  };
+
+
+  if (isHost) {
+
+    sendToAll(message);
+
+  } else if (
+    hostConnection &&
+    hostConnection.open
+  ) {
+
+    try {
+
+      hostConnection.send(
+        message
+      );
+
+    } catch (error) {}
+
+  }
+
+}
+
+
+function handleVoiceState(
+  playerId,
+  enabled
+) {
+
+  if (!playerId) {
+    return;
+  }
+
+
+  /*
+    Se o outro jogador desligou
+    o microfone, encerramos a
+    chamada dele para nós.
+  */
+
+  if (!enabled) {
+
+    closeVoiceCall(
+      playerId
+    );
+
+    removeRemoteAudio(
+      playerId
+    );
+
+    return;
+
+  }
+
+
+  /*
+    Se ele ligou o microfone,
+    quem tiver o menor ID inicia
+    a chamada.
+
+    Isso evita duas chamadas
+    simultâneas para o mesmo par.
+  */
+
+  connectVoiceToPlayers();
+
+}
 
 
 /* =========================
@@ -829,16 +825,16 @@ function createRemoteAudio(
     stream;
 
 
-  const playPromise =
+  const promise =
     audio.play();
 
 
   if (
-    playPromise &&
-    playPromise.catch
+    promise &&
+    promise.catch
   ) {
 
-    playPromise.catch(
+    promise.catch(
       () => {}
     );
 
@@ -877,6 +873,10 @@ function removeRemoteAudio(
 }
 
 
+/* =========================
+   CHAMADAS DE VOZ
+========================= */
+
 function closeVoiceCall(
   playerId
 ) {
@@ -914,23 +914,40 @@ function callPlayer(
     return;
   }
 
-  if (!localStream) {
-    return;
-  }
+
+  /*
+    Só fazemos chamada quando
+    ESTE jogador autorizou o
+    próprio microfone.
+  */
 
   if (
-    playerId ===
-    peer.id
+    !localStream ||
+    !microphoneEnabled
   ) {
+
     return;
+
   }
+
+
+  if (
+    playerId === peer.id
+  ) {
+
+    return;
+
+  }
+
 
   if (
     activeCalls.has(
       playerId
     )
   ) {
+
     return;
+
   }
 
 
@@ -1003,14 +1020,42 @@ function answerVoiceCall(
   call
 ) {
 
-  if (!localStream) {
+  /*
+    Se este jogador não ativou
+    o microfone, NÃO pedimos
+    permissão.
+
+    Respondemos sem enviar
+    nosso próprio áudio.
+  */
+
+  if (
+    !microphoneEnabled ||
+    !localStream
+  ) {
+
+    try {
+
+      call.answer();
+
+    } catch (error) {}
+
     return;
+
   }
 
 
-  call.answer(
-    localStream
-  );
+  try {
+
+    call.answer(
+      localStream
+    );
+
+  } catch (error) {
+
+    return;
+
+  }
 
 
   activeCalls.set(
@@ -1066,13 +1111,80 @@ function answerVoiceCall(
 }
 
 
+function reconnectVoice() {
+
+  if (!peer) {
+    return;
+  }
+
+
+  /*
+    Fecha as chamadas atuais.
+    Depois reconecta somente os
+    pares que realmente precisam.
+  */
+
+  activeCalls.forEach(
+    (call) => {
+
+      try {
+
+        call.close();
+
+      } catch (error) {}
+
+    }
+  );
+
+
+  activeCalls.clear();
+
+
+  document
+    .querySelectorAll(
+      "#remoteAudios audio"
+    )
+    .forEach(
+      (audio) => {
+
+        try {
+
+          audio.pause();
+
+        } catch (error) {}
+
+        audio.remove();
+
+      }
+    );
+
+
+  setTimeout(
+    () => {
+
+      connectVoiceToPlayers();
+
+    },
+    300
+  );
+
+}
+
+
 function connectVoiceToPlayers() {
 
-  if (
-    !peer ||
-    !localStream
-  ) {
+  if (!peer) {
     return;
+  }
+
+
+  if (
+    !localStream ||
+    !microphoneEnabled
+  ) {
+
+    return;
+
   }
 
 
@@ -1083,9 +1195,16 @@ function connectVoiceToPlayers() {
         player.id ===
         peer.id
       ) {
+
         return;
+
       }
 
+
+      /*
+        Apenas o menor ID inicia
+        a chamada.
+      */
 
       if (
         String(peer.id) <
@@ -1115,32 +1234,13 @@ function setupVoiceSystem() {
     "call",
     (call) => {
 
-      if (!localStream) {
+      /*
+        NUNCA chamar
+        enableMicrophone() aqui.
 
-        enableMicrophone()
-          .then(
-            () => {
-
-              if (
-                localStream
-              ) {
-
-                answerVoiceCall(
-                  call
-                );
-
-              }
-
-            }
-          )
-          .catch(
-            () => {}
-          );
-
-        return;
-
-      }
-
+        O usuário precisa ter
+        ativado o próprio microfone.
+      */
 
       answerVoiceCall(
         call
@@ -1153,38 +1253,172 @@ function setupVoiceSystem() {
 
 
 /* =========================
-   CONEXÕES
+   HOST
 ========================= */
 
-function sendToAll(
-  message
+function setupHostConnection(
+  connection
 ) {
 
-  if (
-    !isHost ||
-    !peer
-  ) {
-    return;
-  }
+  hostConnections.set(
+    connection.peer,
+    connection
+  );
 
 
-  peer.connections.forEach(
-    (list) => {
+  lastHeartbeat.set(
+    connection.peer,
+    Date.now()
+  );
 
-      list.forEach(
-        (connection) => {
 
-          if (
-            connection.open
-          ) {
+  connection.on(
+    "open",
+    () => {
 
-            connection.send(
-              message
-            );
+      lastHeartbeat.set(
+        connection.peer,
+        Date.now()
+      );
 
-          }
+    }
+  );
+
+
+  connection.on(
+    "data",
+    (message) => {
+
+      if (
+        !message ||
+        !message.type
+      ) {
+
+        return;
+
+      }
+
+
+      lastHeartbeat.set(
+        connection.peer,
+        Date.now()
+      );
+
+
+      /* =====================
+         ENTRAR
+      ===================== */
+
+      if (
+        message.type ===
+        "join"
+      ) {
+
+        if (
+          players.length >= 5
+        ) {
+
+          try {
+
+            connection.send({
+              type: "room_full"
+            });
+
+          } catch (error) {}
+
+
+          connection.close();
+
+          return;
 
         }
+
+
+        addPlayer(
+          connection.peer,
+          message.name
+        );
+
+
+        try {
+
+          connection.send({
+            type: "players",
+            players: players
+          });
+
+        } catch (error) {}
+
+
+        broadcastPlayers();
+
+        return;
+
+      }
+
+
+      /* =====================
+         HEARTBEAT
+      ===================== */
+
+      if (
+        message.type ===
+        "heartbeat"
+      ) {
+
+        try {
+
+          connection.send({
+            type: "heartbeat_ack"
+          });
+
+        } catch (error) {}
+
+        return;
+
+      }
+
+
+      /* =====================
+         VOZ
+      ===================== */
+
+      if (
+        message.type ===
+        "voice_state"
+      ) {
+
+        sendToAllExcept(
+          connection.peer,
+          message
+        );
+
+        return;
+
+      }
+
+    }
+  );
+
+
+  connection.on(
+    "close",
+    () => {
+
+      removeHostConnection(
+        connection.peer
+      );
+
+    }
+  );
+
+
+  connection.on(
+    "error",
+    () => {
+
+      removeHostConnection(
+        connection.peer
       );
 
     }
@@ -1192,6 +1426,252 @@ function sendToAll(
 
 }
 
+
+function sendToAllExcept(
+  exceptId,
+  message
+) {
+
+  if (!isHost) {
+    return;
+  }
+
+
+  hostConnections.forEach(
+    (connection, id) => {
+
+      if (
+        id === exceptId
+      ) {
+
+        return;
+
+      }
+
+
+      if (
+        connection &&
+        connection.open
+      ) {
+
+        try {
+
+          connection.send(
+            message
+          );
+
+        } catch (error) {}
+
+      }
+
+    }
+  );
+
+}
+
+
+function removeHostConnection(
+  playerId
+) {
+
+  hostConnections.delete(
+    playerId
+  );
+
+  lastHeartbeat.delete(
+    playerId
+  );
+
+
+  const wasPlayer =
+    players.some(
+      (player) =>
+        player.id === playerId
+    );
+
+
+  if (wasPlayer) {
+
+    removePlayer(
+      playerId
+    );
+
+    broadcastPlayers();
+
+  }
+
+}
+
+
+/* =========================
+   HEARTBEAT DO HOST
+========================= */
+
+function startHostHeartbeat() {
+
+  stopHostHeartbeat();
+
+
+  heartbeatTimer =
+    setInterval(
+      () => {
+
+        if (
+          !isHost ||
+          !peer
+        ) {
+
+          return;
+
+        }
+
+
+        const now =
+          Date.now();
+
+
+        hostConnections.forEach(
+          (connection, id) => {
+
+            const last =
+              lastHeartbeat.get(
+                id
+              ) || 0;
+
+
+            /*
+              Se passou muito tempo
+              sem qualquer mensagem,
+              consideramos desconectado.
+            */
+
+            if (
+              now - last >
+              10000
+            ) {
+
+              try {
+
+                connection.close();
+
+              } catch (error) {}
+
+
+              removeHostConnection(
+                id
+              );
+
+              return;
+
+            }
+
+
+            if (
+              connection.open
+            ) {
+
+              try {
+
+                connection.send({
+                  type:
+                    "heartbeat"
+                });
+
+              } catch (error) {}
+
+            }
+
+          }
+        );
+
+
+        broadcastPlayers();
+
+      },
+      3000
+    );
+
+}
+
+
+function stopHostHeartbeat() {
+
+  if (
+    heartbeatTimer
+  ) {
+
+    clearInterval(
+      heartbeatTimer
+    );
+
+    heartbeatTimer =
+      null;
+
+  }
+
+}
+
+
+/* =========================
+   HEARTBEAT DO JOGADOR
+========================= */
+
+function startGuestHeartbeat() {
+
+  stopGuestHeartbeat();
+
+
+  heartbeatTimeoutTimer =
+    setInterval(
+      () => {
+
+        if (
+          !hostConnection ||
+          !hostConnection.open
+        ) {
+
+          return;
+
+        }
+
+
+        try {
+
+          hostConnection.send({
+            type:
+              "heartbeat"
+          });
+
+        } catch (error) {}
+
+      },
+      3000
+    );
+
+}
+
+
+function stopGuestHeartbeat() {
+
+  if (
+    heartbeatTimeoutTimer
+  ) {
+
+    clearInterval(
+      heartbeatTimeoutTimer
+    );
+
+    heartbeatTimeoutTimer =
+      null;
+
+  }
+
+}
+
+
+/* =========================
+   BROADCAST DE JOGADORES
+========================= */
 
 function broadcastPlayers() {
 
@@ -1209,94 +1689,6 @@ function broadcastPlayers() {
   renderPlayers();
 
   updateStatus();
-
-  connectVoiceToPlayers();
-
-}
-
-
-function setupHostConnection(
-  connection
-) {
-
-  connection.on(
-    "data",
-    (message) => {
-
-      if (
-        !message ||
-        !message.type
-      ) {
-        return;
-      }
-
-
-      if (
-        message.type ===
-        "join"
-      ) {
-
-        if (
-          players.length >= 5
-        ) {
-
-          connection.send({
-            type: "room_full"
-          });
-
-          connection.close();
-
-          return;
-
-        }
-
-
-        addPlayer(
-          connection.peer,
-          message.name
-        );
-
-
-        connection.send({
-          type: "players",
-          players: players
-        });
-
-
-        broadcastPlayers();
-
-      }
-
-    }
-  );
-
-
-  connection.on(
-    "close",
-    () => {
-
-      removePlayer(
-        connection.peer
-      );
-
-      broadcastPlayers();
-
-    }
-  );
-
-
-  connection.on(
-    "error",
-    () => {
-
-      removePlayer(
-        connection.peer
-      );
-
-      broadcastPlayers();
-
-    }
-  );
 
 }
 
@@ -1320,6 +1712,9 @@ createButton.addEventListener(
 
     isHost =
       true;
+
+    gameStarted =
+      false;
 
 
     roomCode =
@@ -1345,9 +1740,6 @@ createButton.addEventListener(
       );
 
 
-    setupVoiceSystem();
-
-
     peer.on(
       "open",
       (id) => {
@@ -1355,6 +1747,8 @@ createButton.addEventListener(
         roomCode =
           id;
 
+
+        setupVoiceSystem();
 
         showRoom();
 
@@ -1366,6 +1760,9 @@ createButton.addEventListener(
         renderPlayers();
 
         updateStatus();
+
+
+        startHostHeartbeat();
 
       }
     );
@@ -1388,7 +1785,7 @@ createButton.addEventListener(
       () => {
 
         setStatus(
-          "Conexão perdida."
+          "Conexão com o servidor perdida."
         );
 
       }
@@ -1399,9 +1796,7 @@ createButton.addEventListener(
       "close",
       () => {
 
-        setStatus(
-          "Sala encerrada."
-        );
+        stopHostHeartbeat();
 
       }
     );
@@ -1410,11 +1805,6 @@ createButton.addEventListener(
     peer.on(
       "error",
       (error) => {
-
-        console.error(
-          error
-        );
-
 
         if (
           error.type ===
@@ -1465,7 +1855,7 @@ createButton.addEventListener(
 
 
 /* =========================
-   ENTRAR
+   ENTRAR NA SALA
 ========================= */
 
 joinButton.addEventListener(
@@ -1514,6 +1904,9 @@ joinButton.addEventListener(
     isHost =
       false;
 
+    gameStarted =
+      false;
+
 
     setStatus(
       "Entrando na sala..."
@@ -1524,12 +1917,12 @@ joinButton.addEventListener(
       new Peer();
 
 
-    setupVoiceSystem();
-
-
     peer.on(
       "open",
       () => {
+
+        setupVoiceSystem();
+
 
         hostConnection =
           peer.connect(
@@ -1545,8 +1938,10 @@ joinButton.addEventListener(
           () => {
 
             hostConnection.send({
-              type: "join",
-              name: myName
+              type:
+                "join",
+              name:
+                myName
             });
 
 
@@ -1561,6 +1956,9 @@ joinButton.addEventListener(
               "Conectado."
             );
 
+
+            startGuestHeartbeat();
+
           }
         );
 
@@ -1573,9 +1971,15 @@ joinButton.addEventListener(
               !message ||
               !message.type
             ) {
+
               return;
+
             }
 
+
+            /* ==================
+               JOGADORES
+            ================== */
 
             if (
               message.type ===
@@ -1583,8 +1987,11 @@ joinButton.addEventListener(
             ) {
 
               players =
-                message.players ||
-                [];
+                Array.isArray(
+                  message.players
+                )
+                  ? message.players
+                  : [];
 
 
               renderPlayers();
@@ -1594,8 +2001,66 @@ joinButton.addEventListener(
 
               connectVoiceToPlayers();
 
+              return;
+
             }
 
+
+            /* ==================
+               HEARTBEAT
+            ================== */
+
+            if (
+              message.type ===
+              "heartbeat"
+            ) {
+
+              try {
+
+                hostConnection.send({
+                  type:
+                    "heartbeat"
+                });
+
+              } catch (error) {}
+
+              return;
+
+            }
+
+
+            if (
+              message.type ===
+              "heartbeat_ack"
+            ) {
+
+              return;
+
+            }
+
+
+            /* ==================
+               VOZ
+            ================== */
+
+            if (
+              message.type ===
+              "voice_state"
+            ) {
+
+              handleVoiceState(
+                message.playerId,
+                message.enabled
+              );
+
+              return;
+
+            }
+
+
+            /* ==================
+               SALA CHEIA
+            ================== */
 
             if (
               message.type ===
@@ -1607,17 +2072,16 @@ joinButton.addEventListener(
               );
 
 
-              try {
+              leaveRoom();
 
-                peer.destroy();
-
-              } catch (e) {}
-
-
-              location.reload();
+              return;
 
             }
 
+
+            /* ==================
+               HOST SAIU
+            ================== */
 
             if (
               message.type ===
@@ -1641,7 +2105,7 @@ joinButton.addEventListener(
 
                 peer.destroy();
 
-              } catch (e) {}
+              } catch (error) {}
 
 
               peer =
@@ -1650,15 +2114,40 @@ joinButton.addEventListener(
               hostConnection =
                 null;
 
+
+              stopGuestHeartbeat();
+
+              return;
+
             }
 
+
+            /* ==================
+               COMEÇAR PARTIDA
+            ================== */
 
             if (
               message.type ===
               "game_start"
             ) {
 
+              gameStarted =
+                true;
+
+
+              players =
+                message.players ||
+                players;
+
+
+              renderPlayers();
+
+              updateStatus();
+
+
               startCountdown();
+
+              return;
 
             }
 
@@ -1687,13 +2176,16 @@ joinButton.addEventListener(
               null;
 
 
+            stopGuestHeartbeat();
+
+
             if (peer) {
 
               try {
 
                 peer.destroy();
 
-              } catch (e) {}
+              } catch (error) {}
 
             }
 
@@ -1709,18 +2201,9 @@ joinButton.addEventListener(
           "error",
           () => {
 
-            players = [];
-
-            renderPlayers();
-
-
             setStatus(
               "Conexão perdida."
             );
-
-
-            hostConnection =
-              null;
 
           }
         );
@@ -1732,11 +2215,6 @@ joinButton.addEventListener(
     peer.on(
       "disconnected",
       () => {
-
-        players = [];
-
-        renderPlayers();
-
 
         setStatus(
           "Conexão perdida."
@@ -1750,14 +2228,7 @@ joinButton.addEventListener(
       "close",
       () => {
 
-        players = [];
-
-        renderPlayers();
-
-
-        setStatus(
-          "Sala encerrada."
-        );
+        stopGuestHeartbeat();
 
       }
     );
@@ -1766,11 +2237,6 @@ joinButton.addEventListener(
     peer.on(
       "error",
       (error) => {
-
-        console.error(
-          error
-        );
-
 
         if (
           error.type ===
@@ -1790,18 +2256,205 @@ joinButton.addEventListener(
 
         }
 
+      }
+    );
 
-        players = [];
+  }
+);
 
-        renderPlayers();
+
+/* =========================
+   PARTIDA
+========================= */
+
+function hideGameScreens() {
+
+  countdownScreen.classList.add(
+    "hidden"
+  );
+
+  referenceScreen.classList.add(
+    "hidden"
+  );
+
+  recordScreen.classList.add(
+    "hidden"
+  );
+
+  resultScreen.classList.add(
+    "hidden"
+  );
+
+}
 
 
-        setStatus(
-          "Não foi possível entrar."
+function startCountdown() {
+
+  showGame();
+
+  hideGameScreens();
+
+
+  countdownScreen.classList.remove(
+    "hidden"
+  );
+
+
+  if (countdownTimer) {
+
+    clearInterval(
+      countdownTimer
+    );
+
+  }
+
+
+  let number =
+    3;
+
+
+  countdownNumber.textContent =
+    number;
+
+
+  countdownTimer =
+    setInterval(
+      () => {
+
+        number--;
+
+
+        if (number > 0) {
+
+          countdownNumber.textContent =
+            number;
+
+          return;
+
+        }
+
+
+        clearInterval(
+          countdownTimer
+        );
+
+
+        countdownTimer =
+          null;
+
+
+        countdownNumber.textContent =
+          "GO!";
+
+
+        setTimeout(
+          () => {
+
+            countdownScreen.classList.add(
+              "hidden"
+            );
+
+            referenceScreen.classList.remove(
+              "hidden"
+            );
+
+          },
+          700
+        );
+
+      },
+      1000
+    );
+
+}
+
+
+function startGameForEveryone() {
+
+  if (!isHost) {
+    return;
+  }
+
+
+  /*
+    Só começamos se as conexões
+    dos jogadores estiverem abertas.
+  */
+
+  const connectedPlayers =
+    players.filter(
+      (player) => {
+
+        if (
+          player.id ===
+          peer.id
+        ) {
+
+          return true;
+
+        }
+
+
+        const connection =
+          hostConnections.get(
+            player.id
+          );
+
+
+        return (
+          connection &&
+          connection.open
         );
 
       }
     );
+
+
+  if (
+    connectedPlayers.length !==
+    players.length
+  ) {
+
+    setStatus(
+      "Aguardando todos conectarem..."
+    );
+
+    return;
+
+  }
+
+
+  gameStarted =
+    true;
+
+
+  sendToAll({
+    type:
+      "game_start",
+    players:
+      players
+  });
+
+
+  startCountdown();
+
+}
+
+
+/* =========================
+   BOTÃO COMEÇAR
+========================= */
+
+startButton.addEventListener(
+  "click",
+  () => {
+
+    if (!isHost) {
+      return;
+    }
+
+
+    startGameForEveryone();
 
   }
 );
@@ -1880,6 +2533,23 @@ function leaveRoom() {
 
   closeAllVoice();
 
+  stopHostHeartbeat();
+  stopGuestHeartbeat();
+
+
+  if (
+    countdownTimer
+  ) {
+
+    clearInterval(
+      countdownTimer
+    );
+
+    countdownTimer =
+      null;
+
+  }
+
 
   if (!peer) {
 
@@ -1893,8 +2563,27 @@ function leaveRoom() {
   if (isHost) {
 
     sendToAll({
-      type: "host_left"
+      type:
+        "host_left"
     });
+
+
+    hostConnections.forEach(
+      (connection) => {
+
+        try {
+
+          connection.close();
+
+        } catch (error) {}
+
+      }
+    );
+
+
+    hostConnections.clear();
+
+    lastHeartbeat.clear();
 
 
     players = [];
@@ -1990,34 +2679,7 @@ logoutButton.addEventListener(
   "click",
   () => {
 
-    closeAllVoice();
-
-
-    if (peer) {
-
-      try {
-
-        peer.destroy();
-
-      } catch (error) {}
-
-    }
-
-
-    peer =
-      null;
-
-    hostConnection =
-      null;
-
-    isHost =
-      false;
-
-    roomCode =
-      "";
-
-    players = [];
-
+    leaveRoom();
 
     deleteAccount();
 
@@ -2040,49 +2702,34 @@ copyCodeButton.addEventListener(
     }
 
 
+    const code =
+      roomCode.toUpperCase();
+
+
     try {
 
       await navigator.clipboard.writeText(
-        roomCode.toUpperCase()
-      );
-
-
-      const oldText =
-        copyCodeButton.textContent;
-
-
-      copyCodeButton.textContent =
-        "Código copiado";
-
-
-      setTimeout(
-        () => {
-
-          copyCodeButton.textContent =
-            oldText;
-
-        },
-        1500
+        code
       );
 
     } catch (error) {
 
-      const textArea =
+      const textarea =
         document.createElement(
           "textarea"
         );
 
 
-      textArea.value =
-        roomCode.toUpperCase();
+      textarea.value =
+        code;
 
 
       document.body.appendChild(
-        textArea
+        textarea
       );
 
 
-      textArea.select();
+      textarea.select();
 
 
       document.execCommand(
@@ -2090,50 +2737,28 @@ copyCodeButton.addEventListener(
       );
 
 
-      textArea.remove();
-
-
-      copyCodeButton.textContent =
-        "Código copiado";
-
-
-      setTimeout(
-        () => {
-
-          copyCodeButton.textContent =
-            "Copiar código";
-
-        },
-        1500
-      );
+      textarea.remove();
 
     }
 
-  }
-);
+
+    const oldText =
+      copyCodeButton.textContent;
 
 
-/* =========================
-   COMEÇAR PARTIDA
-========================= */
-
-startButton.addEventListener(
-  "click",
-  () => {
-
-    if (!isHost) {
-      return;
-    }
+    copyCodeButton.textContent =
+      "Código copiado";
 
 
-    if (
-      players.length < 1
-    ) {
-      return;
-    }
+    setTimeout(
+      () => {
 
+        copyCodeButton.textContent =
+          oldText;
 
-    startGameForEveryone();
+      },
+      1500
+    );
 
   }
 );
