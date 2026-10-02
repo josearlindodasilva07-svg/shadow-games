@@ -1,5 +1,6 @@
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html,
@@ -9,7 +10,7 @@ body {
   min-height: 100%;
   font-family: Arial, sans-serif;
   background: #07080c;
-  color: #fff;
+  color: #ffffff;
 }
 
 body {
@@ -18,11 +19,20 @@ body {
   justify-content: center;
 }
 
+button,
+input {
+  font-family: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
 .app {
   width: 100%;
   max-width: 480px;
   min-height: 100vh;
-  padding: 24px 18px;
+  padding: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -32,38 +42,51 @@ section {
   width: 100%;
 }
 
+.hidden {
+  display: none !important;
+}
+
+
+/* =========================
+   LOGIN
+========================= */
+
+#login,
 #home,
 #room {
   background: #101116;
   border: 1px solid #252731;
-  border-radius: 24px;
-  padding: 28px 20px;
+  border-radius: 26px;
+  padding: 26px 20px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
 }
 
-h1 {
-  margin: 0;
+.logo {
   font-size: 34px;
-  letter-spacing: -1px;
+  font-weight: 900;
+  letter-spacing: -1.5px;
+  line-height: .95;
 }
 
-h2 {
-  margin: 0 0 20px;
-  font-size: 28px;
+.logo span {
+  display: block;
+  color: #777bff;
+  font-size: 17px;
+  letter-spacing: 5px;
+  margin-top: 8px;
 }
 
-p {
-  color: #9296a3;
-  margin: 8px 0 24px;
+.subtitle {
+  color: #858996;
+  margin: 14px 0 24px;
 }
 
 input {
   width: 100%;
-  height: 52px;
+  height: 54px;
   padding: 0 16px;
-  margin-bottom: 12px;
   border: 1px solid #292c36;
-  border-radius: 14px;
+  border-radius: 15px;
   outline: none;
   background: #181a21;
   color: #fff;
@@ -74,108 +97,213 @@ input:focus {
   border-color: #777bff;
 }
 
+
+/* =========================
+   BOTÕES
+========================= */
+
 button {
   width: 100%;
   min-height: 52px;
-  margin-top: 10px;
+  margin-top: 11px;
   border: 1px solid #2c2f3a;
-  border-radius: 14px;
+  border-radius: 15px;
   background: #181a21;
   color: #fff;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 800;
+  transition: transform .12s, background .15s;
 }
 
 button:active {
   transform: scale(.98);
 }
 
-#home button:first-of-type,
+#loginButton,
+#create,
 #start {
   border: none;
   background: #6d70ff;
 }
 
-.hidden {
-  display: none !important;
+#loginButton:hover,
+#create:hover,
+#start:hover {
+  background: #777bff;
+}
+
+.secondary {
+  background: transparent;
+  border-color: #292c36;
+  color: #8d909c;
+}
+
+
+/* =========================
+   MENU
+========================= */
+
+#home h1 {
+  margin: 24px 0 6px;
+  font-size: 30px;
+  letter-spacing: -1px;
+}
+
+#home > p {
+  color: #858996;
+  margin: 0 0 20px;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px;
+  border: 1px solid #292c36;
+  background: #181a21;
+  border-radius: 18px;
+}
+
+.profile-label {
+  color: #777b86;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.profile-name {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.avatar {
+  width: 43px;
+  height: 43px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: #6d70ff;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+
+/* =========================
+   SALA
+========================= */
+
+#room {
+  padding: 20px;
+}
+
+#room h2 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -1px;
 }
 
 .code {
-  margin: 20px 0;
-  padding: 20px;
+  position: relative;
+  margin: 20px 0 15px;
+  padding: 19px 16px;
   text-align: center;
   background: #181a21;
   border: 1px solid #292c36;
-  border-radius: 18px;
+  border-radius: 19px;
 }
 
 .code span {
   display: block;
-  color: #858996;
-  font-size: 12px;
+  color: #777b86;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
   margin-bottom: 8px;
-  letter-spacing: 1px;
 }
 
 .code strong {
-  font-size: 34px;
-  letter-spacing: 6px;
+  font-size: 32px;
+  letter-spacing: 7px;
 }
 
 #status {
-  margin: 12px 0;
+  margin: 12px 0 18px;
   text-align: center;
+  color: #858996;
+  font-size: 14px;
 }
+
+
+/* =========================
+   JOGADORES
+========================= */
 
 #players {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 18px 0;
+  margin: 0 0 16px;
 }
 
 .player {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px;
-  border-radius: 14px;
+  min-height: 62px;
+  padding: 9px 12px;
+  border-radius: 16px;
   background: #181a21;
   border: 1px solid #292c36;
 }
 
-.avatar {
+.player .avatar {
   width: 40px;
   height: 40px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: #6d70ff;
-  font-weight: 800;
+  border-radius: 12px;
+  font-size: 16px;
 }
 
 .player-name {
-  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
 }
 
 .player-status {
   margin-left: auto;
   color: #66e39b;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
+
+/* =========================
+   MOBILE
+========================= */
+
 @media (max-width: 360px) {
+
   .app {
-    padding: 14px;
+    padding: 12px;
   }
 
+  #login,
   #home,
   #room {
-    padding: 22px 16px;
+    padding: 21px 16px;
+    border-radius: 22px;
   }
 
-  h1 {
+  .logo {
     font-size: 30px;
+  }
+
+  .code strong {
+    font-size: 28px;
+    letter-spacing: 5px;
   }
 }
