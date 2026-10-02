@@ -111,7 +111,7 @@
       </button>
 
 
-      <!-- CONTROLE DO MICROFONE -->
+      <!-- VOZ -->
 
       <div class="voice-panel">
 
@@ -142,8 +142,6 @@
       <div id="players"></div>
 
 
-      <!-- ÁUDIOS DOS OUTROS JOGADORES -->
-
       <div id="remoteAudios"></div>
 
 
@@ -155,6 +153,113 @@
       <button id="leaveRoom" class="secondary">
         Sair da sala
       </button>
+
+    </section>
+
+
+    <!-- PARTIDA -->
+
+    <section id="game" class="hidden">
+
+      <div class="game-header">
+
+        <div>
+
+          <div class="game-label">
+            SHADOW GAMES
+          </div>
+
+          <div id="roundText" class="round-text">
+            Rodada 1
+          </div>
+
+        </div>
+
+        <div id="gamePlayers" class="game-players">
+          0/5
+        </div>
+
+      </div>
+
+
+      <!-- CONTAGEM -->
+
+      <div id="countdownScreen" class="game-center">
+
+        <div class="countdown-label">
+          PREPARE-SE
+        </div>
+
+        <div id="countdownNumber" class="countdown-number">
+          3
+        </div>
+
+      </div>
+
+
+      <!-- REFERÊNCIA -->
+
+      <div id="referenceScreen" class="game-center hidden">
+
+        <div class="game-label">
+          OUÇA
+        </div>
+
+        <h2>
+          Som de referência
+        </h2>
+
+        <p>
+          Todos vão ouvir o mesmo som.
+        </p>
+
+        <button id="referenceButton">
+          Reproduzir som
+        </button>
+
+      </div>
+
+
+      <!-- GRAVAÇÃO -->
+
+      <div id="recordScreen" class="game-center hidden">
+
+        <div class="game-label">
+          SUA VEZ
+        </div>
+
+        <h2>
+          Faça o som
+        </h2>
+
+        <div id="recordTimer" class="record-timer">
+          5
+        </div>
+
+        <div id="recordStatus" class="record-status">
+          Preparando...
+        </div>
+
+      </div>
+
+
+      <!-- RESULTADO -->
+
+      <div id="resultScreen" class="game-center hidden">
+
+        <div class="game-label">
+          RESULTADO
+        </div>
+
+        <h2>
+          Rodada concluída
+        </h2>
+
+        <p id="resultText">
+          Preparando resultado...
+        </p>
+
+      </div>
 
     </section>
 
