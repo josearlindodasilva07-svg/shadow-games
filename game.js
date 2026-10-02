@@ -1,6 +1,7 @@
 const login = document.getElementById("login");
 const home = document.getElementById("home");
 const room = document.getElementById("room");
+const game = document.getElementById("game");
 
 const usernameInput = document.getElementById("username");
 const loginButton = document.getElementById("loginButton");
@@ -25,22 +26,56 @@ const micButton = document.getElementById("micButton");
 const voiceStatus = document.getElementById("voiceStatus");
 const remoteAudios = document.getElementById("remoteAudios");
 
+const countdownScreen =
+  document.getElementById("countdownScreen");
+
+const countdownNumber =
+  document.getElementById("countdownNumber");
+
+const referenceScreen =
+  document.getElementById("referenceScreen");
+
+const recordScreen =
+  document.getElementById("recordScreen");
+
+const resultScreen =
+  document.getElementById("resultScreen");
+
+const roundText =
+  document.getElementById("roundText");
+
+const gamePlayers =
+  document.getElementById("gamePlayers");
+
+const recordTimer =
+  document.getElementById("recordTimer");
+
+const recordStatus =
+  document.getElementById("recordStatus");
+
+const resultText =
+  document.getElementById("resultText");
+
 
 let peer = null;
 let hostConnection = null;
 
 let isHost = false;
+
 let myName = "";
+
 let roomCode = "";
 
 let players = [];
 
 let localStream = null;
+
 let microphoneEnabled = false;
 
 const activeCalls = new Map();
 
-const ACCOUNT_KEY = "shadow_games_account";
+const ACCOUNT_KEY =
+  "shadow_games_account";
 
 
 /* =========================
@@ -48,7 +83,11 @@ const ACCOUNT_KEY = "shadow_games_account";
 ========================= */
 
 function cleanName(name) {
-  return name.trim().slice(0, 16);
+
+  return name
+    .trim()
+    .slice(0, 16);
+
 }
 
 
@@ -110,13 +149,17 @@ function openHome() {
 
   login.classList.add("hidden");
   room.classList.add("hidden");
+  game.classList.add("hidden");
+
   home.classList.remove("hidden");
 
   profileName.textContent =
     myName;
 
   profileAvatar.textContent =
-    myName.charAt(0).toUpperCase();
+    myName
+      .charAt(0)
+      .toUpperCase();
 
 }
 
@@ -124,8 +167,10 @@ function openHome() {
 function openLogin() {
 
   login.classList.remove("hidden");
+
   home.classList.add("hidden");
   room.classList.add("hidden");
+  game.classList.add("hidden");
 
   usernameInput.value = "";
 
@@ -154,9 +199,11 @@ loginButton.addEventListener(
       );
 
       return;
+
     }
 
-    myName = name;
+    myName =
+      name;
 
     saveAccount(
       myName
@@ -172,7 +219,10 @@ usernameInput.addEventListener(
   "keydown",
   (event) => {
 
-    if (event.key === "Enter") {
+    if (
+      event.key ===
+      "Enter"
+    ) {
 
       loginButton.click();
 
@@ -205,7 +255,7 @@ if (savedName) {
 
 
 /* =========================
-   CÓDIGO DA SALA
+   SALA
 ========================= */
 
 function generateRoomCode() {
@@ -213,9 +263,14 @@ function generateRoomCode() {
   const chars =
     "abcdefghijklmnopqrstuvwxyz";
 
-  let code = "";
+  let code =
+    "";
 
-  for (let i = 0; i < 6; i++) {
+  for (
+    let i = 0;
+    i < 6;
+    i++
+  ) {
 
     code +=
       chars[
@@ -245,6 +300,9 @@ function updateStatus() {
   setStatus(
     `${players.length}/5 jogadores`
   );
+
+  gamePlayers.textContent =
+    `${players.length}/5`;
 
 }
 
@@ -313,6 +371,7 @@ function showRoom() {
 
   home.classList.add("hidden");
   login.classList.add("hidden");
+  game.classList.add("hidden");
 
   room.classList.remove("hidden");
 
@@ -326,8 +385,177 @@ function showHome() {
 
   room.classList.add("hidden");
   login.classList.add("hidden");
+  game.classList.add("hidden");
 
   home.classList.remove("hidden");
+
+}
+
+
+/* =========================
+   PARTIDA
+========================= */
+
+function showGame() {
+
+  login.classList.add("hidden");
+  home.classList.add("hidden");
+  room.classList.add("hidden");
+
+  game.classList.remove("hidden");
+
+  gamePlayers.textContent =
+    `${players.length}/5`;
+
+  roundText.textContent =
+    "Rodada 1";
+
+}
+
+
+function hideGameScreens() {
+
+  countdownScreen.classList.add(
+    "hidden"
+  );
+
+  referenceScreen.classList.add(
+    "hidden"
+  );
+
+  recordScreen.classList.add(
+    "hidden"
+  );
+
+  resultScreen.classList.add(
+    "hidden"
+  );
+
+}
+
+
+function startCountdown() {
+
+  showGame();
+
+  hideGameScreens();
+
+  countdownScreen.classList.remove(
+    "hidden"
+  );
+
+
+  let number =
+    3;
+
+
+  countdownNumber.textContent =
+    number;
+
+
+  const timer =
+    setInterval(
+      () => {
+
+        number--;
+
+        if (number > 0) {
+
+          countdownNumber.textContent =
+            number;
+
+          return;
+
+        }
+
+
+        clearInterval(
+          timer
+        );
+
+
+        countdownNumber.textContent =
+          "GO!";
+
+
+        setTimeout(
+          () => {
+
+            countdownScreen.classList.add(
+              "hidden"
+            );
+
+            referenceScreen.classList.remove(
+              "hidden"
+            );
+
+          },
+          700
+        );
+
+      },
+      1000
+    );
+
+}
+
+
+function startGameForEveryone() {
+
+  if (!isHost) {
+    return;
+  }
+
+
+  sendToAll({
+    type: "game_start",
+    players: players
+  });
+
+
+  startCountdown();
+
+}
+
+
+function showReferenceScreen() {
+
+  hideGameScreens();
+
+  referenceScreen.classList.remove(
+    "hidden"
+  );
+
+}
+
+
+function showRecordScreen() {
+
+  hideGameScreens();
+
+  recordScreen.classList.remove(
+    "hidden"
+  );
+
+  recordTimer.textContent =
+    "5";
+
+  recordStatus.textContent =
+    "Preparando...";
+
+}
+
+
+function showResultScreen() {
+
+  hideGameScreens();
+
+  resultScreen.classList.remove(
+    "hidden"
+  );
+
+  resultText.textContent =
+    "Preparando resultado...";
 
 }
 
@@ -347,6 +575,7 @@ function addPlayer(
         player.id === id
     );
 
+
   if (existing) {
 
     existing.name =
@@ -361,7 +590,9 @@ function addPlayer(
 
   }
 
+
   renderPlayers();
+
   updateStatus();
 
 }
@@ -375,11 +606,18 @@ function removePlayer(id) {
         player.id !== id
     );
 
-  removeRemoteAudio(id);
 
-  closeVoiceCall(id);
+  removeRemoteAudio(
+    id
+  );
+
+  closeVoiceCall(
+    id
+  );
+
 
   renderPlayers();
+
   updateStatus();
 
 }
@@ -420,15 +658,17 @@ async function enableMicrophone() {
     voiceStatus.textContent =
       "Pedindo permissão...";
 
+
     localStream =
-      await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
-        video: false
-      });
+      await navigator.mediaDevices
+        .getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          },
+          video: false
+        });
 
 
     setMicrophoneState(
@@ -444,6 +684,7 @@ async function enableMicrophone() {
       "Microfone:",
       error
     );
+
 
     voiceStatus.textContent =
       "Permissão negada";
@@ -525,32 +766,18 @@ function setMicrophoneState(
 }
 
 
-function disableMicrophone() {
-
-  if (!localStream) {
-    return;
-  }
-
-  setMicrophoneState(
-    false
-  );
-
-}
-
-
 micButton.addEventListener(
   "click",
   async () => {
 
-    if (
-      !localStream
-    ) {
+    if (!localStream) {
 
       await enableMicrophone();
 
       return;
 
     }
+
 
     setMicrophoneState(
       !microphoneEnabled
@@ -561,7 +788,7 @@ micButton.addEventListener(
 
 
 /* =========================
-   ÁUDIO DOS OUTROS
+   ÁUDIO REMOTO
 ========================= */
 
 function createRemoteAudio(
@@ -629,6 +856,7 @@ function removeRemoteAudio(
       `audio-${playerId}`
     );
 
+
   if (!audio) {
     return;
   }
@@ -658,6 +886,7 @@ function closeVoiceCall(
       playerId
     );
 
+
   if (!call) {
     return;
   }
@@ -677,10 +906,6 @@ function closeVoiceCall(
 }
 
 
-/* =========================
-   CHAMADA DE VOZ
-========================= */
-
 function callPlayer(
   playerId
 ) {
@@ -694,7 +919,8 @@ function callPlayer(
   }
 
   if (
-    playerId === peer.id
+    playerId ===
+    peer.id
   ) {
     return;
   }
@@ -861,12 +1087,6 @@ function connectVoiceToPlayers() {
       }
 
 
-      /*
-        Somente o jogador com o ID
-        menor inicia a chamada.
-        Isso evita chamadas duplicadas.
-      */
-
       if (
         String(peer.id) <
         String(player.id)
@@ -884,10 +1104,6 @@ function connectVoiceToPlayers() {
 }
 
 
-/* =========================
-   CHAMADAS RECEBIDAS
-========================= */
-
 function setupVoiceSystem() {
 
   if (!peer) {
@@ -900,12 +1116,6 @@ function setupVoiceSystem() {
     (call) => {
 
       if (!localStream) {
-
-        /*
-          Ainda não ativou o microfone.
-          Pedimos o microfone para poder
-          responder à chamada.
-        */
 
         enableMicrophone()
           .then(
@@ -943,7 +1153,7 @@ function setupVoiceSystem() {
 
 
 /* =========================
-   CONEXÃO DE DADOS
+   CONEXÕES
 ========================= */
 
 function sendToAll(
@@ -997,17 +1207,13 @@ function broadcastPlayers() {
 
 
   renderPlayers();
-  updateStatus();
 
+  updateStatus();
 
   connectVoiceToPlayers();
 
 }
 
-
-/* =========================
-   CONEXÃO DO HOST
-========================= */
 
 function setupHostConnection(
   connection
@@ -1112,7 +1318,8 @@ createButton.addEventListener(
     }
 
 
-    isHost = true;
+    isHost =
+      true;
 
 
     roomCode =
@@ -1148,6 +1355,7 @@ createButton.addEventListener(
         roomCode =
           id;
 
+
         showRoom();
 
 
@@ -1156,14 +1364,8 @@ createButton.addEventListener(
 
 
         renderPlayers();
+
         updateStatus();
-
-
-        /*
-          A voz só começa quando
-          o jogador apertar o botão
-          do microfone.
-        */
 
       }
     );
@@ -1231,11 +1433,15 @@ createButton.addEventListener(
           } catch (e) {}
 
 
-          peer = null;
+          peer =
+            null;
 
-          isHost = false;
+          isHost =
+            false;
 
-          roomCode = "";
+          roomCode =
+            "";
+
 
           setStatus(
             "Erro ao criar sala."
@@ -1259,7 +1465,7 @@ createButton.addEventListener(
 
 
 /* =========================
-   ENTRAR NA SALA
+   ENTRAR
 ========================= */
 
 joinButton.addEventListener(
@@ -1305,7 +1511,8 @@ joinButton.addEventListener(
     }
 
 
-    isHost = false;
+    isHost =
+      false;
 
 
     setStatus(
@@ -1381,6 +1588,7 @@ joinButton.addEventListener(
 
 
               renderPlayers();
+
               updateStatus();
 
 
@@ -1436,7 +1644,8 @@ joinButton.addEventListener(
               } catch (e) {}
 
 
-              peer = null;
+              peer =
+                null;
 
               hostConnection =
                 null;
@@ -1446,16 +1655,10 @@ joinButton.addEventListener(
 
             if (
               message.type ===
-              "start_game"
+              "game_start"
             ) {
 
-              setStatus(
-                "Partida iniciada!"
-              );
-
-              alert(
-                "A partida começou!"
-              );
+              startCountdown();
 
             }
 
@@ -1495,7 +1698,8 @@ joinButton.addEventListener(
             }
 
 
-            peer = null;
+            peer =
+              null;
 
           }
         );
@@ -1604,7 +1808,7 @@ joinButton.addEventListener(
 
 
 /* =========================
-   SAIR DA SALA
+   SAIR
 ========================= */
 
 function closeAllVoice() {
@@ -1705,11 +1909,14 @@ function leaveRoom() {
     } catch (error) {}
 
 
-    peer = null;
+    peer =
+      null;
 
-    isHost = false;
+    isHost =
+      false;
 
-    roomCode = "";
+    roomCode =
+      "";
 
 
     showHome();
@@ -1742,7 +1949,8 @@ function leaveRoom() {
 
     } catch (error) {}
 
-    peer = null;
+    peer =
+      null;
 
   }
 
@@ -1752,9 +1960,11 @@ function leaveRoom() {
   renderPlayers();
 
 
-  isHost = false;
+  isHost =
+    false;
 
-  roomCode = "";
+  roomCode =
+    "";
 
 
   showHome();
@@ -1794,20 +2004,22 @@ logoutButton.addEventListener(
     }
 
 
-    peer = null;
+    peer =
+      null;
 
     hostConnection =
       null;
 
-    isHost = false;
+    isHost =
+      false;
 
-    roomCode = "";
+    roomCode =
+      "";
 
     players = [];
 
 
     deleteAccount();
-
 
     openLogin();
 
@@ -1902,7 +2114,7 @@ copyCodeButton.addEventListener(
 
 
 /* =========================
-   COMEÇAR
+   COMEÇAR PARTIDA
 ========================= */
 
 startButton.addEventListener(
@@ -1914,19 +2126,14 @@ startButton.addEventListener(
     }
 
 
-    sendToAll({
-      type: "start_game"
-    });
+    if (
+      players.length < 1
+    ) {
+      return;
+    }
 
 
-    setStatus(
-      "Partida iniciada!"
-    );
-
-
-    alert(
-      "A partida começou!"
-    );
+    startGameForEveryone();
 
   }
 );
