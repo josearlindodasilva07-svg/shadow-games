@@ -1,9 +1,16 @@
+const login = document.getElementById("login");
 const home = document.getElementById("home");
 const room = document.getElementById("room");
 
-const nameInput = document.getElementById("name");
+const usernameInput = document.getElementById("username");
+const loginButton = document.getElementById("loginButton");
+
+const profileName = document.getElementById("profileName");
+const profileAvatar = document.getElementById("profileAvatar");
+
 const createButton = document.getElementById("create");
 const joinButton = document.getElementById("join");
+const logoutButton = document.getElementById("logout");
 const startButton = document.getElementById("start");
 
 const roomCodeElement = document.getElementById("roomCode");
@@ -19,16 +26,143 @@ let roomCode = "";
 
 let players = [];
 
+const ACCOUNT_KEY = "shadow_games_account";
+
+
+/* =========================
+   CONTA
+========================= */
+
 function cleanName(name) {
   return name.trim().slice(0, 16);
 }
 
+function saveAccount(name) {
+  localStorage.setItem(
+    ACCOUNT_KEY,
+    JSON.stringify({
+      name: name
+    })
+  );
+}
+
+function loadAccount() {
+  try {
+    const saved = localStorage.getItem(ACCOUNT_KEY);
+
+    if (!saved) {
+      return null;
+    }
+
+    const account = JSON.parse(saved);
+
+    if (!account.name) {
+      return null;
+    }
+
+    return cleanName(account.name);
+  } catch (error) {
+    return null;
+  }
+}
+
+function deleteAccount() {
+  localStorage.removeItem(ACCOUNT_KEY);
+}
+
+function openHome() {
+  login.classList.add("hidden");
+  room.classList.add("hidden");
+  home.classList.remove("hidden");
+
+  profileName.textContent = myName;
+
+  profileAvatar.textContent =
+    myName.charAt(0).toUpperCase();
+}
+
+function openLogin() {
+  login.classList.remove("hidden");
+  home.classList.add("hidden");
+  room.classList.add("hidden");
+
+  usernameInput.value = "";
+  usernameInput.focus();
+}
+
+
+/* =========================
+   LOGIN
+========================= */
+
+loginButton.addEventListener("click", () => {
+  const name = cleanName(usernameInput.value);
+
+  if (!name) {
+    alert("Digite um nome de usuário.");
+    return;
+  }
+
+  myName = name;
+
+  saveAccount(myName);
+
+  openHome();
+});
+
+usernameInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    loginButton.click();
+  }
+});
+
+logoutButton.addEventListener("click", () => {
+  if (peer) {
+    try {
+      peer.destroy();
+    } catch (error) {}
+  }
+
+  peer = null;
+  hostConnection = null;
+
+  isHost = false;
+  roomCode = "";
+  players = [];
+
+  deleteAccount();
+
+  openLogin();
+});
+
+
+/* =========================
+   INICIALIZAÇÃO
+========================= */
+
+const savedName = loadAccount();
+
+if (savedName) {
+  myName = savedName;
+  openHome();
+} else {
+  openLogin();
+}
+
+
+/* =========================
+   SALA
+========================= */
+
 function generateRoomCode() {
   const chars = "abcdefghijklmnopqrstuvwxyz";
+
   let code = "";
 
   for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
+    code += chars[
+      Math.floor(Math.random() * chars.length)
+    ];
   }
 
   return code;
@@ -44,7 +178,9 @@ function updateStatus() {
 
 function escapeHTML(text) {
   const div = document.createElement("div");
+
   div.textContent = text;
+
   return div.innerHTML;
 }
 
@@ -60,9 +196,17 @@ function renderPlayers() {
       player.name.charAt(0).toUpperCase();
 
     element.innerHTML = `
-      <div class="avatar">${escapeHTML(firstLetter)}</div>
-      <div class="player-name">${escapeHTML(player.name)}</div>
-      <div class="player-status">Online</div>
+      <div class="avatar">
+        ${escapeHTML(firstLetter)}
+      </div>
+
+      <div class="player-name">
+        ${escapeHTML(player.name)}
+      </div>
+
+      <div class="player-status">
+        Online
+      </div>
     `;
 
     playersElement.appendChild(element);
@@ -71,6 +215,7 @@ function renderPlayers() {
 
 function showRoom() {
   home.classList.add("hidden");
+  login.classList.add("hidden");
   room.classList.remove("hidden");
 
   roomCodeElement.textContent =
@@ -105,7 +250,9 @@ function removePlayer(id) {
 }
 
 function sendToAll(message) {
-  if (!isHost || !peer) return;
+  if (!isHost || !peer) {
+    return;
+  }
 
   peer.connections.forEach((list) => {
     list.forEach((connection) => {
@@ -117,7 +264,9 @@ function sendToAll(message) {
 }
 
 function broadcastPlayers() {
-  if (!isHost) return;
+  if (!isHost) {
+    return;
+  }
 
   sendToAll({
     type: "players",
@@ -128,44 +277,29 @@ function broadcastPlayers() {
   updateStatus();
 }
 
-function leaveRoom() {
-  players = [];
 
-  renderPlayers();
-
-  setStatus("Sala encerrada.");
-
-  if (hostConnection) {
-    try {
-      hostConnection.close();
-    } catch (e) {}
-  }
-
-  if (peer) {
-    try {
-      peer.destroy();
-    } catch (e) {}
-  }
-
-  hostConnection = null;
-  peer = null;
-}
+/* =========================
+   CONEXÃO DO HOST
+========================= */
 
 function setupHostConnection(connection) {
-  connection.on("open", () => {
-    console.log("Jogador conectado");
-  });
 
   connection.on("data", (message) => {
-    if (!message || !message.type) return;
+
+    if (!message || !message.type) {
+      return;
+    }
 
     if (message.type === "join") {
+
       if (players.length >= 5) {
+
         connection.send({
           type: "room_full"
         });
 
         connection.close();
+
         return;
       }
 
@@ -184,23 +318,33 @@ function setupHostConnection(connection) {
   });
 
   connection.on("close", () => {
-    removePlayer(connection.peer);
+
+    removePlayer(
+      connection.peer
+    );
 
     broadcastPlayers();
   });
 
   connection.on("error", () => {
-    removePlayer(connection.peer);
+
+    removePlayer(
+      connection.peer
+    );
 
     broadcastPlayers();
   });
 }
 
+
+/* =========================
+   CRIAR SALA
+========================= */
+
 createButton.addEventListener("click", () => {
-  myName = cleanName(nameInput.value);
 
   if (!myName) {
-    alert("Digite seu nome.");
+    openLogin();
     return;
   }
 
@@ -219,7 +363,9 @@ createButton.addEventListener("click", () => {
 
   peer = new Peer(roomCode);
 
+
   peer.on("open", (id) => {
+
     roomCode = id;
 
     showRoom();
@@ -231,192 +377,330 @@ createButton.addEventListener("click", () => {
     updateStatus();
   });
 
+
   peer.on("connection", (connection) => {
-    setupHostConnection(connection);
+
+    setupHostConnection(
+      connection
+    );
   });
+
 
   peer.on("disconnected", () => {
-    if (isHost) {
-      setStatus("Conexão perdida.");
-    }
+
+    setStatus(
+      "Conexão perdida."
+    );
   });
+
 
   peer.on("close", () => {
-    if (isHost) {
-      setStatus("Sala encerrada.");
-    }
+
+    setStatus(
+      "Sala encerrada."
+    );
   });
 
+
   peer.on("error", (error) => {
+
     console.error(error);
 
-    if (error.type === "unavailable-id") {
-      alert("Esse código já está sendo usado. Crie outra sala.");
+    if (
+      error.type === "unavailable-id"
+    ) {
+
+      alert(
+        "Esse código já está sendo usado. Crie outra sala."
+      );
 
       try {
         peer.destroy();
       } catch (e) {}
 
       peer = null;
+
       isHost = false;
+
       roomCode = "";
 
-      setStatus("Erro ao criar sala.");
+      setStatus(
+        "Erro ao criar sala."
+      );
 
       return;
     }
 
-    alert("Erro na conexão: " + error.type);
+    alert(
+      "Erro na conexão: " +
+      error.type
+    );
   });
 });
 
+
+/* =========================
+   ENTRAR NA SALA
+========================= */
+
 joinButton.addEventListener("click", () => {
-  myName = cleanName(nameInput.value);
 
   if (!myName) {
-    alert("Digite seu nome.");
+    openLogin();
     return;
   }
 
-  const code = prompt("Digite o código da sala:");
+  const code = prompt(
+    "Digite o código da sala:"
+  );
 
-  if (!code) return;
+  if (!code) {
+    return;
+  }
 
-  roomCode = code.trim().toLowerCase();
+  roomCode =
+    code.trim().toLowerCase();
 
   if (roomCode.length !== 6) {
-    alert("O código precisa ter 6 caracteres.");
+
+    alert(
+      "O código precisa ter 6 caracteres."
+    );
+
     return;
   }
 
   isHost = false;
 
-  setStatus("Entrando na sala...");
+  setStatus(
+    "Entrando na sala..."
+  );
 
   peer = new Peer();
 
+
   peer.on("open", () => {
-    hostConnection = peer.connect(roomCode, {
-      reliable: true
-    });
 
-    hostConnection.on("open", () => {
-      hostConnection.send({
-        type: "join",
-        name: myName
-      });
+    hostConnection =
+      peer.connect(
+        roomCode,
+        {
+          reliable: true
+        }
+      );
 
-      showRoom();
 
-      startButton.style.display = "none";
+    hostConnection.on(
+      "open",
+      () => {
 
-      setStatus("Conectado.");
-    });
+        hostConnection.send({
+          type: "join",
+          name: myName
+        });
 
-    hostConnection.on("data", (message) => {
-      if (!message || !message.type) return;
+        showRoom();
 
-      if (message.type === "players") {
-        players = message.players || [];
+        startButton.style.display =
+          "none";
+
+        setStatus(
+          "Conectado."
+        );
+      }
+    );
+
+
+    hostConnection.on(
+      "data",
+      (message) => {
+
+        if (
+          !message ||
+          !message.type
+        ) {
+          return;
+        }
+
+
+        if (
+          message.type ===
+          "players"
+        ) {
+
+          players =
+            message.players || [];
+
+          renderPlayers();
+
+          updateStatus();
+        }
+
+
+        if (
+          message.type ===
+          "room_full"
+        ) {
+
+          alert(
+            "A sala está cheia."
+          );
+
+          try {
+            peer.destroy();
+          } catch (e) {}
+
+          location.reload();
+        }
+
+
+        if (
+          message.type ===
+          "start_game"
+        ) {
+
+          setStatus(
+            "Partida iniciada!"
+          );
+
+          alert(
+            "A partida começou!"
+          );
+        }
+      }
+    );
+
+
+    hostConnection.on(
+      "close",
+      () => {
+
+        players = [];
 
         renderPlayers();
-        updateStatus();
+
+        setStatus(
+          "O dono da sala saiu."
+        );
+
+        hostConnection = null;
+
+        if (peer) {
+          try {
+            peer.destroy();
+          } catch (e) {}
+        }
+
+        peer = null;
       }
+    );
 
-      if (message.type === "room_full") {
-        alert("A sala está cheia.");
 
-        leaveRoom();
+    hostConnection.on(
+      "error",
+      () => {
 
-        location.reload();
+        players = [];
+
+        renderPlayers();
+
+        setStatus(
+          "Conexão perdida."
+        );
+
+        hostConnection = null;
       }
+    );
+  });
 
-      if (message.type === "start_game") {
-        setStatus("Partida iniciada!");
 
-        alert("A partida começou!");
-      }
-    });
-
-    hostConnection.on("close", () => {
-      /*
-       * O dono saiu.
-       * Limpa a lista imediatamente.
-       */
+  peer.on(
+    "disconnected",
+    () => {
 
       players = [];
 
       renderPlayers();
 
-      setStatus("O dono da sala saiu.");
+      setStatus(
+        "Conexão perdida."
+      );
+    }
+  );
 
-      hostConnection = null;
 
-      if (peer) {
-        try {
-          peer.destroy();
-        } catch (e) {}
-      }
+  peer.on(
+    "close",
+    () => {
 
-      peer = null;
-    });
-
-    hostConnection.on("error", () => {
       players = [];
 
       renderPlayers();
 
-      setStatus("Conexão perdida.");
+      setStatus(
+        "Sala encerrada."
+      );
+    }
+  );
 
-      hostConnection = null;
-    });
-  });
 
-  peer.on("disconnected", () => {
-    if (!hostConnection) return;
+  peer.on(
+    "error",
+    (error) => {
 
-    players = [];
+      console.error(error);
 
-    renderPlayers();
+      if (
+        error.type ===
+        "peer-unavailable"
+      ) {
 
-    setStatus("Conexão perdida.");
-  });
+        alert(
+          "Sala não encontrada."
+        );
 
-  peer.on("close", () => {
-    if (!hostConnection) return;
+      } else {
 
-    players = [];
+        alert(
+          "Erro na conexão: " +
+          error.type
+        );
+      }
 
-    renderPlayers();
+      players = [];
 
-    setStatus("Sala encerrada.");
-  });
+      renderPlayers();
 
-  peer.on("error", (error) => {
-    console.error(error);
+      setStatus(
+        "Não foi possível entrar."
+      );
+    }
+  );
+});
 
-    if (error.type === "peer-unavailable") {
-      alert("Sala não encontrada.");
-    } else {
-      alert("Erro na conexão: " + error.type);
+
+/* =========================
+   COMEÇAR PARTIDA
+========================= */
+
+startButton.addEventListener(
+  "click",
+  () => {
+
+    if (!isHost) {
+      return;
     }
 
-    players = [];
+    sendToAll({
+      type: "start_game"
+    });
 
-    renderPlayers();
+    setStatus(
+      "Partida iniciada!"
+    );
 
-    setStatus("Não foi possível entrar.");
-  });
-});
-
-startButton.addEventListener("click", () => {
-  if (!isHost) return;
-
-  sendToAll({
-    type: "start_game"
-  });
-
-  setStatus("Partida iniciada!");
-
-  alert("A partida começou!");
-});
+    alert(
+      "A partida começou!"
+    );
+  }
+);
