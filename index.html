@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,6 +15,7 @@
   <main class="app">
 
     <!-- LOGIN -->
+
     <section id="login">
 
       <div class="logo">
@@ -40,12 +42,15 @@
 
 
     <!-- MENU -->
+
     <section id="home" class="hidden">
 
       <div class="profile">
+
         <div id="profileAvatar" class="avatar"></div>
 
         <div>
+
           <div class="profile-label">
             Jogando como
           </div>
@@ -53,14 +58,18 @@
           <div id="profileName" class="profile-name">
             -
           </div>
+
         </div>
+
       </div>
+
 
       <h1>Shadow Games</h1>
 
       <p>
         Party game multiplayer
       </p>
+
 
       <button id="create">
         Criar sala
@@ -77,14 +86,18 @@
     </section>
 
 
-    <!-- SALA -->
+    <!-- LOBBY -->
+
     <section id="room" class="hidden">
 
       <h2>Sala</h2>
 
+
       <div class="code">
 
-        <span>Código da sala</span>
+        <span>
+          Código da sala
+        </span>
 
         <strong id="roomCode">
           ------
@@ -92,14 +105,27 @@
 
       </div>
 
+
+      <button id="copyCode" class="secondary">
+        Copiar código
+      </button>
+
+
       <p id="status">
         Conectando...
       </p>
 
+
       <div id="players"></div>
+
 
       <button id="start">
         Começar partida
+      </button>
+
+
+      <button id="leaveRoom" class="secondary">
+        Sair da sala
       </button>
 
     </section>
@@ -112,4 +138,5 @@
   <script src="game.js"></script>
 
 </body>
+
 </html>
