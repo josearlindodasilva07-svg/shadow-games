@@ -11,6 +11,10 @@ const profileAvatar = document.getElementById("profileAvatar");
 const createButton = document.getElementById("create");
 const joinButton = document.getElementById("join");
 const logoutButton = document.getElementById("logout");
+
+const copyCodeButton = document.getElementById("copyCode");
+const leaveRoomButton = document.getElementById("leaveRoom");
+
 const startButton = document.getElementById("start");
 
 const roomCodeElement = document.getElementById("roomCode");
@@ -61,6 +65,7 @@ function loadAccount() {
     }
 
     return cleanName(account.name);
+
   } catch (error) {
     return null;
   }
@@ -96,7 +101,9 @@ function openLogin() {
 ========================= */
 
 loginButton.addEventListener("click", () => {
-  const name = cleanName(usernameInput.value);
+
+  const name =
+    cleanName(usernameInput.value);
 
   if (!name) {
     alert("Digite um nome de usuário.");
@@ -110,30 +117,41 @@ loginButton.addEventListener("click", () => {
   openHome();
 });
 
-usernameInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    loginButton.click();
+
+usernameInput.addEventListener(
+  "keydown",
+  (event) => {
+
+    if (event.key === "Enter") {
+      loginButton.click();
+    }
+
   }
-});
+);
 
-logoutButton.addEventListener("click", () => {
-  if (peer) {
-    try {
-      peer.destroy();
-    } catch (error) {}
+
+logoutButton.addEventListener(
+  "click",
+  () => {
+
+    if (peer) {
+      try {
+        peer.destroy();
+      } catch (error) {}
+    }
+
+    peer = null;
+    hostConnection = null;
+
+    isHost = false;
+    roomCode = "";
+    players = [];
+
+    deleteAccount();
+
+    openLogin();
   }
-
-  peer = null;
-  hostConnection = null;
-
-  isHost = false;
-  roomCode = "";
-  players = [];
-
-  deleteAccount();
-
-  openLogin();
-});
+);
 
 
 /* =========================
@@ -143,10 +161,15 @@ logoutButton.addEventListener("click", () => {
 const savedName = loadAccount();
 
 if (savedName) {
+
   myName = savedName;
+
   openHome();
+
 } else {
+
   openLogin();
+
 }
 
 
@@ -155,45 +178,64 @@ if (savedName) {
 ========================= */
 
 function generateRoomCode() {
-  const chars = "abcdefghijklmnopqrstuvwxyz";
+
+  const chars =
+    "abcdefghijklmnopqrstuvwxyz";
 
   let code = "";
 
   for (let i = 0; i < 6; i++) {
+
     code += chars[
-      Math.floor(Math.random() * chars.length)
+      Math.floor(
+        Math.random() * chars.length
+      )
     ];
+
   }
 
   return code;
 }
 
+
 function setStatus(text) {
   statusElement.textContent = text;
 }
 
+
 function updateStatus() {
-  setStatus(`${players.length}/5 jogadores`);
+  setStatus(
+    `${players.length}/5 jogadores`
+  );
 }
 
+
 function escapeHTML(text) {
-  const div = document.createElement("div");
+
+  const div =
+    document.createElement("div");
 
   div.textContent = text;
 
   return div.innerHTML;
 }
 
+
 function renderPlayers() {
+
   playersElement.innerHTML = "";
 
   players.forEach((player) => {
-    const element = document.createElement("div");
+
+    const element =
+      document.createElement("div");
 
     element.className = "player";
 
     const firstLetter =
-      player.name.charAt(0).toUpperCase();
+      player.name
+        .charAt(0)
+        .toUpperCase();
 
     element.innerHTML = `
       <div class="avatar">
@@ -210,60 +252,105 @@ function renderPlayers() {
     `;
 
     playersElement.appendChild(element);
+
   });
 }
 
+
 function showRoom() {
+
   home.classList.add("hidden");
   login.classList.add("hidden");
+
   room.classList.remove("hidden");
 
   roomCodeElement.textContent =
     roomCode.toUpperCase();
 }
 
+
+function showHome() {
+
+  room.classList.add("hidden");
+  login.classList.add("hidden");
+
+  home.classList.remove("hidden");
+}
+
+
 function addPlayer(id, name) {
-  const existing = players.find(
-    (player) => player.id === id
-  );
+
+  const existing =
+    players.find(
+      (player) =>
+        player.id === id
+    );
 
   if (existing) {
+
     existing.name = name;
+
   } else {
+
     players.push({
       id: id,
       name: name
     });
+
   }
 
   renderPlayers();
   updateStatus();
 }
 
+
 function removePlayer(id) {
-  players = players.filter(
-    (player) => player.id !== id
-  );
+
+  players =
+    players.filter(
+      (player) =>
+        player.id !== id
+    );
 
   renderPlayers();
   updateStatus();
 }
 
+
+/* =========================
+   ENVIAR PARA TODOS
+========================= */
+
 function sendToAll(message) {
+
   if (!isHost || !peer) {
     return;
   }
 
-  peer.connections.forEach((list) => {
-    list.forEach((connection) => {
-      if (connection.open) {
-        connection.send(message);
-      }
-    });
-  });
+  peer.connections.forEach(
+    (list) => {
+
+      list.forEach(
+        (connection) => {
+
+          if (connection.open) {
+
+            connection.send(
+              message
+            );
+
+          }
+
+        }
+      );
+
+    }
+  );
 }
 
+
 function broadcastPlayers() {
+
   if (!isHost) {
     return;
   }
@@ -279,61 +366,236 @@ function broadcastPlayers() {
 
 
 /* =========================
-   CONEXÃO DO HOST
+   SAIR DA SALA
 ========================= */
 
-function setupHostConnection(connection) {
+function leaveRoom() {
 
-  connection.on("data", (message) => {
+  if (!peer) {
+    showHome();
+    return;
+  }
 
-    if (!message || !message.type) {
+
+  if (isHost) {
+
+    sendToAll({
+      type: "host_left"
+    });
+
+    players = [];
+
+    renderPlayers();
+
+    try {
+      peer.destroy();
+    } catch (error) {}
+
+    peer = null;
+
+    isHost = false;
+    roomCode = "";
+
+    showHome();
+
+    return;
+  }
+
+
+  if (hostConnection) {
+
+    try {
+      hostConnection.close();
+    } catch (error) {}
+
+    hostConnection = null;
+  }
+
+
+  if (peer) {
+
+    try {
+      peer.destroy();
+    } catch (error) {}
+
+    peer = null;
+  }
+
+
+  players = [];
+
+  renderPlayers();
+
+  isHost = false;
+  roomCode = "";
+
+  showHome();
+}
+
+
+/* =========================
+   BOTÃO SAIR
+========================= */
+
+leaveRoomButton.addEventListener(
+  "click",
+  () => {
+
+    leaveRoom();
+
+  }
+);
+
+
+/* =========================
+   COPIAR CÓDIGO
+========================= */
+
+copyCodeButton.addEventListener(
+  "click",
+  async () => {
+
+    if (!roomCode) {
       return;
     }
 
-    if (message.type === "join") {
+    try {
 
-      if (players.length >= 5) {
+      await navigator.clipboard.writeText(
+        roomCode.toUpperCase()
+      );
 
-        connection.send({
-          type: "room_full"
-        });
+      const oldText =
+        copyCodeButton.textContent;
 
-        connection.close();
+      copyCodeButton.textContent =
+        "Código copiado";
 
+      setTimeout(() => {
+
+        copyCodeButton.textContent =
+          oldText;
+
+      }, 1500);
+
+    } catch (error) {
+
+      const textArea =
+        document.createElement("textarea");
+
+      textArea.value =
+        roomCode.toUpperCase();
+
+      document.body.appendChild(
+        textArea
+      );
+
+      textArea.select();
+
+      document.execCommand(
+        "copy"
+      );
+
+      textArea.remove();
+
+      copyCodeButton.textContent =
+        "Código copiado";
+
+      setTimeout(() => {
+
+        copyCodeButton.textContent =
+          "Copiar código";
+
+      }, 1500);
+
+    }
+
+  }
+);
+
+
+/* =========================
+   CONEXÃO DO HOST
+========================= */
+
+function setupHostConnection(
+  connection
+) {
+
+  connection.on(
+    "data",
+    (message) => {
+
+      if (
+        !message ||
+        !message.type
+      ) {
         return;
       }
 
-      addPlayer(
-        connection.peer,
-        message.name
+
+      if (
+        message.type === "join"
+      ) {
+
+        if (players.length >= 5) {
+
+          connection.send({
+            type: "room_full"
+          });
+
+          connection.close();
+
+          return;
+        }
+
+
+        addPlayer(
+          connection.peer,
+          message.name
+        );
+
+
+        connection.send({
+          type: "players",
+          players: players
+        });
+
+
+        broadcastPlayers();
+
+      }
+
+    }
+  );
+
+
+  connection.on(
+    "close",
+    () => {
+
+      removePlayer(
+        connection.peer
       );
 
-      connection.send({
-        type: "players",
-        players: players
-      });
+      broadcastPlayers();
+
+    }
+  );
+
+
+  connection.on(
+    "error",
+    () => {
+
+      removePlayer(
+        connection.peer
+      );
 
       broadcastPlayers();
+
     }
-  });
-
-  connection.on("close", () => {
-
-    removePlayer(
-      connection.peer
-    );
-
-    broadcastPlayers();
-  });
-
-  connection.on("error", () => {
-
-    removePlayer(
-      connection.peer
-    );
-
-    broadcastPlayers();
-  });
+  );
 }
 
 
@@ -341,263 +603,383 @@ function setupHostConnection(connection) {
    CRIAR SALA
 ========================= */
 
-createButton.addEventListener("click", () => {
+createButton.addEventListener(
+  "click",
+  () => {
 
-  if (!myName) {
-    openLogin();
-    return;
-  }
-
-  isHost = true;
-
-  roomCode = generateRoomCode();
-
-  players = [
-    {
-      id: roomCode,
-      name: myName
-    }
-  ];
-
-  setStatus("Criando sala...");
-
-  peer = new Peer(roomCode);
-
-
-  peer.on("open", (id) => {
-
-    roomCode = id;
-
-    showRoom();
-
-    startButton.style.display = "block";
-
-    renderPlayers();
-
-    updateStatus();
-  });
-
-
-  peer.on("connection", (connection) => {
-
-    setupHostConnection(
-      connection
-    );
-  });
-
-
-  peer.on("disconnected", () => {
-
-    setStatus(
-      "Conexão perdida."
-    );
-  });
-
-
-  peer.on("close", () => {
-
-    setStatus(
-      "Sala encerrada."
-    );
-  });
-
-
-  peer.on("error", (error) => {
-
-    console.error(error);
-
-    if (
-      error.type === "unavailable-id"
-    ) {
-
-      alert(
-        "Esse código já está sendo usado. Crie outra sala."
-      );
-
-      try {
-        peer.destroy();
-      } catch (e) {}
-
-      peer = null;
-
-      isHost = false;
-
-      roomCode = "";
-
-      setStatus(
-        "Erro ao criar sala."
-      );
-
+    if (!myName) {
+      openLogin();
       return;
     }
 
-    alert(
-      "Erro na conexão: " +
-      error.type
+
+    isHost = true;
+
+    roomCode =
+      generateRoomCode();
+
+
+    players = [
+      {
+        id: roomCode,
+        name: myName
+      }
+    ];
+
+
+    setStatus(
+      "Criando sala..."
     );
-  });
-});
+
+
+    peer =
+      new Peer(roomCode);
+
+
+    peer.on(
+      "open",
+      (id) => {
+
+        roomCode = id;
+
+        showRoom();
+
+        startButton.style.display =
+          "block";
+
+        renderPlayers();
+
+        updateStatus();
+
+      }
+    );
+
+
+    peer.on(
+      "connection",
+      (connection) => {
+
+        setupHostConnection(
+          connection
+        );
+
+      }
+    );
+
+
+    peer.on(
+      "disconnected",
+      () => {
+
+        setStatus(
+          "Conexão perdida."
+        );
+
+      }
+    );
+
+
+    peer.on(
+      "close",
+      () => {
+
+        setStatus(
+          "Sala encerrada."
+        );
+
+      }
+    );
+
+
+    peer.on(
+      "error",
+      (error) => {
+
+        console.error(error);
+
+
+        if (
+          error.type ===
+          "unavailable-id"
+        ) {
+
+          alert(
+            "Esse código já está sendo usado. Crie outra sala."
+          );
+
+
+          try {
+            peer.destroy();
+          } catch (e) {}
+
+
+          peer = null;
+
+          isHost = false;
+
+          roomCode = "";
+
+          setStatus(
+            "Erro ao criar sala."
+          );
+
+          return;
+        }
+
+
+        alert(
+          "Erro na conexão: " +
+          error.type
+        );
+
+      }
+    );
+
+  }
+);
 
 
 /* =========================
    ENTRAR NA SALA
 ========================= */
 
-joinButton.addEventListener("click", () => {
+joinButton.addEventListener(
+  "click",
+  () => {
 
-  if (!myName) {
-    openLogin();
-    return;
-  }
-
-  const code = prompt(
-    "Digite o código da sala:"
-  );
-
-  if (!code) {
-    return;
-  }
-
-  roomCode =
-    code.trim().toLowerCase();
-
-  if (roomCode.length !== 6) {
-
-    alert(
-      "O código precisa ter 6 caracteres."
-    );
-
-    return;
-  }
-
-  isHost = false;
-
-  setStatus(
-    "Entrando na sala..."
-  );
-
-  peer = new Peer();
+    if (!myName) {
+      openLogin();
+      return;
+    }
 
 
-  peer.on("open", () => {
-
-    hostConnection =
-      peer.connect(
-        roomCode,
-        {
-          reliable: true
-        }
+    const code =
+      prompt(
+        "Digite o código da sala:"
       );
 
 
-    hostConnection.on(
+    if (!code) {
+      return;
+    }
+
+
+    roomCode =
+      code
+        .trim()
+        .toLowerCase();
+
+
+    if (roomCode.length !== 6) {
+
+      alert(
+        "O código precisa ter 6 caracteres."
+      );
+
+      return;
+    }
+
+
+    isHost = false;
+
+
+    setStatus(
+      "Entrando na sala..."
+    );
+
+
+    peer =
+      new Peer();
+
+
+    peer.on(
       "open",
       () => {
 
-        hostConnection.send({
-          type: "join",
-          name: myName
-        });
-
-        showRoom();
-
-        startButton.style.display =
-          "none";
-
-        setStatus(
-          "Conectado."
-        );
-      }
-    );
-
-
-    hostConnection.on(
-      "data",
-      (message) => {
-
-        if (
-          !message ||
-          !message.type
-        ) {
-          return;
-        }
-
-
-        if (
-          message.type ===
-          "players"
-        ) {
-
-          players =
-            message.players || [];
-
-          renderPlayers();
-
-          updateStatus();
-        }
-
-
-        if (
-          message.type ===
-          "room_full"
-        ) {
-
-          alert(
-            "A sala está cheia."
+        hostConnection =
+          peer.connect(
+            roomCode,
+            {
+              reliable: true
+            }
           );
 
-          try {
-            peer.destroy();
-          } catch (e) {}
 
-          location.reload();
-        }
+        hostConnection.on(
+          "open",
+          () => {
 
-
-        if (
-          message.type ===
-          "start_game"
-        ) {
-
-          setStatus(
-            "Partida iniciada!"
-          );
-
-          alert(
-            "A partida começou!"
-          );
-        }
-      }
-    );
+            hostConnection.send({
+              type: "join",
+              name: myName
+            });
 
 
-    hostConnection.on(
-      "close",
-      () => {
+            showRoom();
 
-        players = [];
 
-        renderPlayers();
+            startButton.style.display =
+              "none";
 
-        setStatus(
-          "O dono da sala saiu."
+
+            setStatus(
+              "Conectado."
+            );
+
+          }
         );
 
-        hostConnection = null;
 
-        if (peer) {
-          try {
-            peer.destroy();
-          } catch (e) {}
-        }
+        hostConnection.on(
+          "data",
+          (message) => {
 
-        peer = null;
+            if (
+              !message ||
+              !message.type
+            ) {
+              return;
+            }
+
+
+            if (
+              message.type ===
+              "players"
+            ) {
+
+              players =
+                message.players || [];
+
+              renderPlayers();
+
+              updateStatus();
+
+            }
+
+
+            if (
+              message.type ===
+              "room_full"
+            ) {
+
+              alert(
+                "A sala está cheia."
+              );
+
+
+              try {
+                peer.destroy();
+              } catch (e) {}
+
+
+              location.reload();
+
+            }
+
+
+            if (
+              message.type ===
+              "host_left"
+            ) {
+
+              players = [];
+
+              renderPlayers();
+
+              setStatus(
+                "O dono da sala saiu."
+              );
+
+
+              try {
+                peer.destroy();
+              } catch (e) {}
+
+
+              peer = null;
+
+              hostConnection =
+                null;
+
+            }
+
+
+            if (
+              message.type ===
+              "start_game"
+            ) {
+
+              setStatus(
+                "Partida iniciada!"
+              );
+
+              alert(
+                "A partida começou!"
+              );
+
+            }
+
+          }
+        );
+
+
+        hostConnection.on(
+          "close",
+          () => {
+
+            players = [];
+
+            renderPlayers();
+
+            setStatus(
+              "O dono da sala saiu."
+            );
+
+
+            hostConnection =
+              null;
+
+
+            if (peer) {
+
+              try {
+                peer.destroy();
+              } catch (e) {}
+
+            }
+
+
+            peer = null;
+
+          }
+        );
+
+
+        hostConnection.on(
+          "error",
+          () => {
+
+            players = [];
+
+            renderPlayers();
+
+            setStatus(
+              "Conexão perdida."
+            );
+
+
+            hostConnection =
+              null;
+
+          }
+        );
+
       }
     );
 
 
-    hostConnection.on(
-      "error",
+    peer.on(
+      "disconnected",
       () => {
 
         players = [];
@@ -608,79 +990,69 @@ joinButton.addEventListener("click", () => {
           "Conexão perdida."
         );
 
-        hostConnection = null;
       }
     );
-  });
 
 
-  peer.on(
-    "disconnected",
-    () => {
+    peer.on(
+      "close",
+      () => {
 
-      players = [];
+        players = [];
 
-      renderPlayers();
+        renderPlayers();
 
-      setStatus(
-        "Conexão perdida."
-      );
-    }
-  );
-
-
-  peer.on(
-    "close",
-    () => {
-
-      players = [];
-
-      renderPlayers();
-
-      setStatus(
-        "Sala encerrada."
-      );
-    }
-  );
-
-
-  peer.on(
-    "error",
-    (error) => {
-
-      console.error(error);
-
-      if (
-        error.type ===
-        "peer-unavailable"
-      ) {
-
-        alert(
-          "Sala não encontrada."
+        setStatus(
+          "Sala encerrada."
         );
 
-      } else {
-
-        alert(
-          "Erro na conexão: " +
-          error.type
-        );
       }
+    );
 
-      players = [];
 
-      renderPlayers();
+    peer.on(
+      "error",
+      (error) => {
 
-      setStatus(
-        "Não foi possível entrar."
-      );
-    }
-  );
-});
+        console.error(error);
+
+
+        if (
+          error.type ===
+          "peer-unavailable"
+        ) {
+
+          alert(
+            "Sala não encontrada."
+          );
+
+        } else {
+
+          alert(
+            "Erro na conexão: " +
+            error.type
+          );
+
+        }
+
+
+        players = [];
+
+        renderPlayers();
+
+        setStatus(
+          "Não foi possível entrar."
+        );
+
+      }
+    );
+
+  }
+);
 
 
 /* =========================
-   COMEÇAR PARTIDA
+   COMEÇAR
 ========================= */
 
 startButton.addEventListener(
@@ -691,16 +1063,20 @@ startButton.addEventListener(
       return;
     }
 
+
     sendToAll({
       type: "start_game"
     });
+
 
     setStatus(
       "Partida iniciada!"
     );
 
+
     alert(
       "A partida começou!"
     );
+
   }
 );
