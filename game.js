@@ -34,13 +34,6 @@ function generateRoomCode() {
   return code;
 }
 
-function showRoom() {
-  home.classList.add("hidden");
-  room.classList.remove("hidden");
-
-  roomCodeElement.textContent = roomCode.toUpperCase();
-}
-
 function setStatus(text) {
   statusElement.textContent = text;
 }
@@ -76,6 +69,14 @@ function renderPlayers() {
   });
 }
 
+function showRoom() {
+  home.classList.add("hidden");
+  room.classList.remove("hidden");
+
+  roomCodeElement.textContent =
+    roomCode.toUpperCase();
+}
+
 function addPlayer(id, name) {
   const existing = players.find(
     (player) => player.id === id
@@ -106,8 +107,8 @@ function removePlayer(id) {
 function sendToAll(message) {
   if (!isHost || !peer) return;
 
-  peer.connections.forEach((connectionList) => {
-    connectionList.forEach((connection) => {
+  peer.connections.forEach((list) => {
+    list.forEach((connection) => {
       if (connection.open) {
         connection.send(message);
       }
@@ -127,9 +128,32 @@ function broadcastPlayers() {
   updateStatus();
 }
 
+function leaveRoom() {
+  players = [];
+
+  renderPlayers();
+
+  setStatus("Sala encerrada.");
+
+  if (hostConnection) {
+    try {
+      hostConnection.close();
+    } catch (e) {}
+  }
+
+  if (peer) {
+    try {
+      peer.destroy();
+    } catch (e) {}
+  }
+
+  hostConnection = null;
+  peer = null;
+}
+
 function setupHostConnection(connection) {
   connection.on("open", () => {
-    console.log("Jogador conectado:", connection.peer);
+    console.log("Jogador conectado");
   });
 
   connection.on("data", (message) => {
@@ -181,6 +205,7 @@ createButton.addEventListener("click", () => {
   }
 
   isHost = true;
+
   roomCode = generateRoomCode();
 
   players = [
@@ -210,13 +235,27 @@ createButton.addEventListener("click", () => {
     setupHostConnection(connection);
   });
 
+  peer.on("disconnected", () => {
+    if (isHost) {
+      setStatus("Conexão perdida.");
+    }
+  });
+
+  peer.on("close", () => {
+    if (isHost) {
+      setStatus("Sala encerrada.");
+    }
+  });
+
   peer.on("error", (error) => {
     console.error(error);
 
     if (error.type === "unavailable-id") {
       alert("Esse código já está sendo usado. Crie outra sala.");
 
-      peer.destroy();
+      try {
+        peer.destroy();
+      } catch (e) {}
 
       peer = null;
       isHost = false;
@@ -271,7 +310,7 @@ joinButton.addEventListener("click", () => {
 
       startButton.style.display = "none";
 
-      setStatus("Conectado. Aguardando...");
+      setStatus("Conectado.");
     });
 
     hostConnection.on("data", (message) => {
@@ -287,7 +326,7 @@ joinButton.addEventListener("click", () => {
       if (message.type === "room_full") {
         alert("A sala está cheia.");
 
-        peer.destroy();
+        leaveRoom();
 
         location.reload();
       }
@@ -300,14 +339,57 @@ joinButton.addEventListener("click", () => {
     });
 
     hostConnection.on("close", () => {
+      /*
+       * O dono saiu.
+       * Limpa a lista imediatamente.
+       */
+
+      players = [];
+
+      renderPlayers();
+
       setStatus("O dono da sala saiu.");
 
-      alert("O dono da sala saiu.");
+      hostConnection = null;
+
+      if (peer) {
+        try {
+          peer.destroy();
+        } catch (e) {}
+      }
+
+      peer = null;
     });
 
     hostConnection.on("error", () => {
-      setStatus("Erro na conexão.");
+      players = [];
+
+      renderPlayers();
+
+      setStatus("Conexão perdida.");
+
+      hostConnection = null;
     });
+  });
+
+  peer.on("disconnected", () => {
+    if (!hostConnection) return;
+
+    players = [];
+
+    renderPlayers();
+
+    setStatus("Conexão perdida.");
+  });
+
+  peer.on("close", () => {
+    if (!hostConnection) return;
+
+    players = [];
+
+    renderPlayers();
+
+    setStatus("Sala encerrada.");
   });
 
   peer.on("error", (error) => {
@@ -319,14 +401,16 @@ joinButton.addEventListener("click", () => {
       alert("Erro na conexão: " + error.type);
     }
 
+    players = [];
+
+    renderPlayers();
+
     setStatus("Não foi possível entrar.");
   });
 });
 
 startButton.addEventListener("click", () => {
   if (!isHost) return;
-
-  if (players.length < 1) return;
 
   sendToAll({
     type: "start_game"
