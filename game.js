@@ -1,12 +1,15 @@
 "use strict";
 
 /* =========================================================
-   SHADOW GAMES V1
-   3D LOBBY + MULTIPLAYER
-   Three.js + PeerJS
+   SHADOW GAMES V1.1
+   3D + MULTIPLAYER + VOICE STATE
    ========================================================= */
 
 const $ = id => document.getElementById(id);
+
+/* =========================================================
+   UI
+   ========================================================= */
 
 const loginScreen = $("loginScreen");
 const homeScreen = $("homeScreen");
@@ -67,12 +70,16 @@ const joystick = $("joystick");
 const joystickKnob = $("joystickKnob");
 
 /* =========================================================
-   STATE
+   USER
    ========================================================= */
 
 let username = "";
 let myPlayerId = "";
 let myPeerId = "";
+
+/* =========================================================
+   PEER
+   ========================================================= */
 
 let peer = null;
 
@@ -80,93 +87,161 @@ let roomCode = "";
 let isHost = false;
 let hostPeerId = "";
 
-let localStream = null;
-let micEnabled = false;
+const connections = new Map();
+const voiceCalls = new Map();
 
-let connections = new Map();
-let voiceCalls = new Map();
-let remotePlayers = new Map();
+/* =========================================================
+   PLAYERS
+   ========================================================= */
 
 let players = [];
 
-let heartbeatTimer = null;
-let hostCleanupTimer = null;
+/*
+  Cada jogador possui:
+  voice = true/false
+
+  Isso é separado do microfone físico.
+*/
+
+function getPlayer(playerId) {
+  return players.find(p => p.id === playerId);
+}
+
+/* =========================================================
+   VOICE
+   ========================================================= */
+
+let localStream = null;
+
+let voiceEnabled = false;
+
+/*
+  Fases onde NINGUÉM pode conversar.
+*/
+let voiceLocked = false;
+
+/*
+  Estado anterior antes de bloquear.
+*/
+let voiceBeforeLock = false;
+
+/* =========================================================
+   GAME
+   ========================================================= */
 
 let gameRunning = false;
 let currentRound = 1;
 
-let recordTimer = null;
+let currentPhase = "idle";
 
 let mediaRecorder = null;
 let recordedChunks = [];
 
+let recordTimer = null;
+
+/* =========================================================
+   MOVEMENT
+   ========================================================= */
+
 let joystickActive = false;
 let joystickPointerId = null;
+
 let joystickX = 0;
 let joystickY = 0;
+
+const keys = {
+  forward: false,
+  backward: false,
+  left: false,
+  right: false
+};
 
 let cameraYaw = 0;
 let cameraPitch = 0.32;
 
-let lastFrameTime = performance.now();
+let lastPositionSend = 0;
 
+/* =========================================================
+   THREE
+   ========================================================= */
+
+let scene;
+let renderer;
+let camera;
 let myCharacter = null;
 let cameraTarget = null;
+
+const worldPlayers = new Map();
+
+let lastFrameTime = performance.now();
 
 /* =========================================================
    LOGIN
    ========================================================= */
 
+function cleanName(value) {
+  return String(value || "Player")
+    .replace(/[\u0000-\u001F\u007F]/g, "")
+    .trim()
+    .slice(0, 16) || "Player";
+}
+
 function loadSavedUser() {
   const saved = localStorage.getItem("shadow_username");
 
   if (saved) {
-    usernameInput.value = saved;
+    usernameInput.value = cleanName(saved);
   }
 }
 
 function login() {
-  const value = usernameInput.value.trim();
+  const value = cleanName(usernameInput.value);
 
   if (!value) {
     loginStatus.textContent = "Digite seu nome.";
     return;
   }
 
-  username = value.slice(0, 16);
+  username = value;
 
-  localStorage.setItem("shadow_username", username);
+  localStorage.setItem(
+    "shadow_username",
+    username
+  );
 
   myPlayerId =
     "player-" +
     Date.now().toString(36) +
     "-" +
-    Math.random().toString(36).slice(2, 8);
+    Math.random().toString(36).slice(2, 9);
 
   profileName.textContent = username;
-  profileAvatar.textContent = username.charAt(0).toUpperCase();
+  profileAvatar.textContent =
+    username.charAt(0).toUpperCase();
 
   loginScreen.classList.add("hidden");
   homeScreen.classList.remove("hidden");
 
-  homeStatus.textContent = "";
+  loginStatus.textContent = "";
 }
 
 function logout() {
   disconnectEverything();
 
-  localStorage.removeItem("shadow_username");
+  localStorage.removeItem(
+    "shadow_username"
+  );
 
   username = "";
   myPlayerId = "";
+
+  usernameInput.value = "";
 
   homeScreen.classList.add("hidden");
   roomScreen.classList.add("hidden");
   gameScreen.classList.add("hidden");
 
   loginScreen.classList.remove("hidden");
-
-  usernameInput.value = "";
 }
 
 /* =========================================================
@@ -198,87 +273,37 @@ function showGame() {
 }
 
 /* =========================================================
-   ROOM CODE
+   ROOM
    ========================================================= */
 
 function generateRoomCode() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const chars =
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
   let result = "";
 
   for (let i = 0; i < 6; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
+    result += chars[
+      Math.floor(Math.random() * chars.length)
+    ];
   }
 
   return result;
 }
 
-/* =========================================================
-   PEER
-   ========================================================= */
-
-function createPeer(id) {
-  return new Promise((resolve, reject) => {
-
-    const p = new Peer(id, {
-      debug: 0
-    });
-
-    p.on("open", peerId => {
-      peer = p;
-      myPeerId = peerId;
-
-      resolve(p);
-    });
-
-    p.on("connection", conn => {
-      handleIncomingConnection(conn);
-    });
-
-    p.on("call", call => {
-      handleIncomingVoiceCall(call);
-    });
-
-    p.on("error", error => {
-      console.warn("Peer error:", error);
-
-      if (isHost) {
-        connectionBadge.textContent = "Problema";
-      }
-    });
-
-    p.on("disconnected", () => {
-      connectionBadge.textContent = "Desconectado";
-    });
-
-    p.on("close", () => {
-      connectionBadge.textContent = "Fechado";
-    });
-
-    setTimeout(() => {
-      if (!peer) {
-        reject(new Error("Não foi possível conectar."));
-      }
-    }, 15000);
-  });
-}
-
-/* =========================================================
-   CREATE ROOM
-   ========================================================= */
-
 async function createRoom() {
+  homeStatus.textContent =
+    "Criando sala...";
 
-  homeStatus.textContent = "Criando sala...";
-
-  roomCode = generateRoomCode();
+  roomCode =
+    generateRoomCode();
 
   isHost = true;
 
-  hostPeerId = "shadow-room-" + roomCode;
+  hostPeerId =
+    "shadow-room-" + roomCode;
 
   try {
-
     await createPeer(hostPeerId);
 
     players = [
@@ -287,6 +312,7 @@ async function createRoom() {
         name: username,
         peerId: myPeerId,
         host: true,
+        voice: false,
         x: 0,
         y: 0,
         z: 2
@@ -297,8 +323,11 @@ async function createRoom() {
 
     showRoom();
 
-    connectionBadge.textContent = "Online";
-    roomStatus.textContent = "Sala criada.";
+    connectionBadge.textContent =
+      "Online";
+
+    roomStatus.textContent =
+      "Sala criada.";
 
     startHeartbeat();
 
@@ -307,17 +336,12 @@ async function createRoom() {
     rebuildWorldPlayers();
 
   } catch (error) {
-
     isHost = false;
 
     homeStatus.textContent =
       "Não foi possível criar a sala.";
   }
 }
-
-/* =========================================================
-   JOIN ROOM
-   ========================================================= */
 
 function showJoin() {
   joinPanel.classList.remove("hidden");
@@ -330,71 +354,162 @@ function cancelJoin() {
 }
 
 async function joinRoom() {
-
-  const code = joinCodeInput.value
-    .trim()
-    .toUpperCase();
+  const code =
+    joinCodeInput.value
+      .trim()
+      .toUpperCase();
 
   if (code.length !== 6) {
-    joinStatus.textContent = "Digite um código de 6 caracteres.";
+    joinStatus.textContent =
+      "Digite um código de 6 caracteres.";
     return;
   }
 
-  joinStatus.textContent = "Entrando...";
+  joinStatus.textContent =
+    "Entrando...";
 
   roomCode = code;
   isHost = false;
 
-  hostPeerId = "shadow-room-" + roomCode;
+  hostPeerId =
+    "shadow-room-" + roomCode;
 
   try {
-
     const guestPeerId =
       "shadow-player-" +
       Date.now().toString(36) +
       "-" +
-      Math.random().toString(36).slice(2, 7);
+      Math.random().toString(36).slice(2, 8);
 
-    await createPeer(guestPeerId);
+    await createPeer(
+      guestPeerId
+    );
 
-    const conn = peer.connect(hostPeerId, {
-      reliable: true,
-      serialization: "binary"
-    });
+    const conn =
+      peer.connect(
+        hostPeerId,
+        {
+          reliable: true
+        }
+      );
 
-    setupConnection(conn, true);
+    setupConnection(conn);
 
-    const timeout = setTimeout(() => {
+    const timeout =
+      setTimeout(() => {
 
-      if (players.length === 0) {
-        joinStatus.textContent =
-          "Não foi possível encontrar a sala.";
+        if (!players.length) {
 
-        disconnectEverything();
-      }
+          joinStatus.textContent =
+            "Não foi possível encontrar a sala.";
 
-    }, 12000);
+          disconnectEverything();
+        }
 
-    conn.__joinTimeout = timeout;
+      }, 12000);
 
-  } catch (error) {
+    conn.__joinTimeout =
+      timeout;
 
+  } catch {
     joinStatus.textContent =
       "Não foi possível entrar.";
   }
 }
 
 /* =========================================================
+   PEER
+   ========================================================= */
+
+function createPeer(id) {
+  return new Promise(
+    (resolve, reject) => {
+
+      const p =
+        new Peer(id, {
+          debug: 0
+        });
+
+      p.on(
+        "open",
+        peerId => {
+
+          peer = p;
+          myPeerId = peerId;
+
+          resolve(p);
+        }
+      );
+
+      p.on(
+        "connection",
+        conn => {
+          setupConnection(conn);
+        }
+      );
+
+      p.on(
+        "call",
+        call => {
+          handleIncomingVoiceCall(call);
+        }
+      );
+
+      p.on(
+        "error",
+        error => {
+
+          console.warn(
+            "Peer error:",
+            error
+          );
+        }
+      );
+
+      p.on(
+        "disconnected",
+        () => {
+
+          connectionBadge.textContent =
+            "Desconectado";
+        }
+      );
+
+      setTimeout(
+        () => {
+
+          if (!peer) {
+            reject(
+              new Error(
+                "Timeout"
+              )
+            );
+          }
+
+        },
+        15000
+      );
+    }
+  );
+}
+
+/* =========================================================
    CONNECTION
    ========================================================= */
 
-function setupConnection(conn, isHostConnection) {
+function setupConnection(conn) {
 
-  if (!conn || !conn.peer) return;
+  if (!conn || !conn.peer) {
+    return;
+  }
 
-  const existing = connections.get(conn.peer);
+  const existing =
+    connections.get(conn.peer);
 
-  if (existing && existing.open) {
+  if (
+    existing &&
+    existing.open
+  ) {
     try {
       conn.close();
     } catch {}
@@ -402,152 +517,233 @@ function setupConnection(conn, isHostConnection) {
     return;
   }
 
-  connections.set(conn.peer, conn);
+  connections.set(
+    conn.peer,
+    conn
+  );
 
-  conn.on("open", () => {
+  conn.on(
+    "open",
+    () => {
 
-    if (conn.__joinTimeout) {
-      clearTimeout(conn.__joinTimeout);
+      if (conn.__joinTimeout) {
+        clearTimeout(
+          conn.__joinTimeout
+        );
+      }
+
+      if (isHost) {
+
+        sendRoomState(conn);
+
+        /*
+          Voz NÃO começa automaticamente.
+          Só começa quando os estados de voz
+          permitirem.
+        */
+
+      } else {
+
+        sendData(
+          conn,
+          {
+            type: "HELLO",
+
+            player: {
+              id: myPlayerId,
+              name: username,
+              peerId: myPeerId,
+              voice: false
+            }
+          }
+        );
+      }
+
+      connectionBadge.textContent =
+        "Online";
     }
+  );
 
-    if (isHost) {
-
-      sendRoomState(conn);
-
-      setTimeout(() => {
-        setupVoiceForPeer(conn.peer);
-      }, 300);
-
-    } else {
-
-      sendData(conn, {
-        type: "HELLO",
-        player: {
-          id: myPlayerId,
-          name: username,
-          peerId: myPeerId
-        }
-      });
-
+  conn.on(
+    "data",
+    data => {
+      handleData(
+        conn,
+        data
+      );
     }
+  );
 
-    connectionBadge.textContent = "Online";
-  });
+  conn.on(
+    "close",
+    () => {
 
-  conn.on("data", data => {
-    handleData(conn, data);
-  });
-
-  conn.on("close", () => {
-
-    connections.delete(conn.peer);
-
-    const removedPlayer = players.find(
-      p => p.peerId === conn.peer
-    );
-
-    if (isHost && removedPlayer) {
-
-      players = players.filter(
-        p => p.peerId !== conn.peer
+      connections.delete(
+        conn.peer
       );
 
-      broadcastRoomState();
+      const removed =
+        players.find(
+          p => p.peerId === conn.peer
+        );
 
-      removeWorldPlayer(removedPlayer.id);
+      if (
+        isHost &&
+        removed
+      ) {
 
-    } else if (!isHost) {
+        players =
+          players.filter(
+            p => p.id !== removed.id
+          );
 
-      const wasHost =
-        conn.peer === hostPeerId;
+        removeWorldPlayer(
+          removed.id
+        );
 
-      if (wasHost) {
+        broadcastRoomState();
+
+        closeVoiceWithPlayer(
+          removed.peerId
+        );
+      }
+
+      if (
+        !isHost &&
+        conn.peer === hostPeerId
+      ) {
 
         roomStatus.textContent =
           "O dono da sala saiu.";
 
-        connectionBadge.textContent =
-          "Sala encerrada";
+        closeAllVoice();
 
-        stopHeartbeat();
+        setTimeout(
+          () => {
 
-        setTimeout(() => {
-          disconnectEverything();
-          showHome();
-        }, 1200);
+            disconnectEverything();
+            showHome();
+
+          },
+          1000
+        );
       }
+
+      renderPlayers();
     }
+  );
 
-    voiceCalls.delete(conn.peer);
-
-    renderPlayers();
-  });
-
-  conn.on("error", () => {
-    connections.delete(conn.peer);
-  });
-}
-
-function handleIncomingConnection(conn) {
-  setupConnection(conn, false);
+  conn.on(
+    "error",
+    () => {
+      connections.delete(
+        conn.peer
+      );
+    }
+  );
 }
 
 /* =========================================================
    DATA
    ========================================================= */
 
-function sendData(conn, data) {
-
-  if (!conn || !conn.open) return;
+function sendData(
+  conn,
+  data
+) {
+  if (
+    !conn ||
+    !conn.open
+  ) {
+    return;
+  }
 
   try {
     conn.send(data);
   } catch {}
 }
 
-function broadcast(data, exceptPeerId = null) {
+function broadcast(
+  data,
+  exceptPeerId = null
+) {
+  for (
+    const [
+      peerId,
+      conn
+    ] of connections
+  ) {
 
-  for (const [peerId, conn] of connections) {
+    if (
+      peerId ===
+      exceptPeerId
+    ) {
+      continue;
+    }
 
-    if (peerId === exceptPeerId) continue;
-
-    sendData(conn, data);
+    sendData(
+      conn,
+      data
+    );
   }
 }
 
-function handleData(conn, data) {
-
-  if (!data || !data.type) return;
+function handleData(
+  conn,
+  data
+) {
+  if (
+    !data ||
+    !data.type
+  ) {
+    return;
+  }
 
   switch (data.type) {
 
     case "HELLO":
-      handleHello(conn, data);
+      handleHello(
+        conn,
+        data
+      );
       break;
 
     case "ROOM_STATE":
-      handleRoomState(data);
+      handleRoomState(
+        data
+      );
       break;
 
     case "PLAYER_UPDATE":
-      handlePlayerUpdate(data);
+      handlePlayerUpdate(
+        data
+      );
+      break;
+
+    case "VOICE_STATE":
+      handleVoiceState(
+        data
+      );
       break;
 
     case "START_GAME":
-      handleStartGame(data);
+      handleStartGame(
+        data
+      );
       break;
 
     case "PING":
-      sendData(conn, {
-        type: "PONG",
-        time: Date.now()
-      });
+      sendData(
+        conn,
+        {
+          type: "PONG"
+        }
+      );
       break;
 
-    case "PONG":
-      break;
-
-    default:
+    case "ROOM_CLOSED":
+      disconnectEverything();
+      showHome();
       break;
   }
 }
@@ -556,44 +752,69 @@ function handleData(conn, data) {
    HELLO
    ========================================================= */
 
-function handleHello(conn, data) {
+function handleHello(
+  conn,
+  data
+) {
+  if (!isHost) {
+    return;
+  }
 
-  if (!isHost) return;
-
-  if (!data.player) return;
+  if (!data.player) {
+    return;
+  }
 
   if (players.length >= 5) {
 
-    sendData(conn, {
-      type: "ROOM_FULL"
-    });
+    sendData(
+      conn,
+      {
+        type: "ROOM_FULL"
+      }
+    );
 
-    setTimeout(() => {
-      try {
-        conn.close();
-      } catch {}
-    }, 100);
+    setTimeout(
+      () => {
+        try {
+          conn.close();
+        } catch {}
+      },
+      100
+    );
 
     return;
   }
 
-  const incoming = data.player;
+  const incoming =
+    data.player;
 
-  const already = players.find(
-    p => p.id === incoming.id
-  );
+  const existing =
+    players.find(
+      p =>
+        p.id ===
+        incoming.id
+    );
 
-  if (already) {
-    already.peerId = conn.peer;
-    already.name = cleanName(incoming.name);
+  if (existing) {
+
+    existing.peerId =
+      conn.peer;
+
+    existing.name =
+      cleanName(
+        incoming.name
+      );
+
   } else {
 
     players.push({
       id: incoming.id,
-      name: cleanName(incoming.name),
+      name: cleanName(
+        incoming.name
+      ),
       peerId: conn.peer,
       host: false,
-
+      voice: false,
       x: randomSpawnX(),
       y: 0,
       z: randomSpawnZ()
@@ -604,8 +825,6 @@ function handleHello(conn, data) {
 
   broadcastRoomState();
 
-  setupVoiceForPeer(conn.peer);
-
   rebuildWorldPlayers();
 }
 
@@ -613,89 +832,112 @@ function handleHello(conn, data) {
    ROOM STATE
    ========================================================= */
 
-function sendRoomState(conn) {
+function buildRoomState() {
 
-  sendData(conn, {
+  return {
     type: "ROOM_STATE",
 
     roomCode,
 
-    hostId: players.find(p => p.host)?.id || myPlayerId,
-
     hostPeerId,
 
-    players: players.map(p => ({
-      id: p.id,
-      name: p.name,
-      peerId: p.peerId,
-      host: !!p.host,
-      x: p.x,
-      y: p.y,
-      z: p.z
-    }))
-  });
+    players:
+      players.map(
+        p => ({
+          id: p.id,
+          name: p.name,
+          peerId: p.peerId,
+          host: !!p.host,
+          voice: !!p.voice,
+          x: p.x,
+          y: p.y,
+          z: p.z
+        })
+      )
+  };
+}
+
+function sendRoomState(
+  conn
+) {
+  sendData(
+    conn,
+    buildRoomState()
+  );
 }
 
 function broadcastRoomState() {
-
-  const state = {
-    type: "ROOM_STATE",
-
-    roomCode,
-
-    hostId: players.find(p => p.host)?.id || myPlayerId,
-
-    hostPeerId,
-
-    players: players.map(p => ({
-      id: p.id,
-      name: p.name,
-      peerId: p.peerId,
-      host: !!p.host,
-      x: p.x,
-      y: p.y,
-      z: p.z
-    }))
-  };
-
-  broadcast(state);
+  broadcast(
+    buildRoomState()
+  );
 
   renderPlayers();
 }
 
-function handleRoomState(data) {
+function handleRoomState(
+  data
+) {
 
-  if (!Array.isArray(data.players)) return;
+  if (
+    !Array.isArray(
+      data.players
+    )
+  ) {
+    return;
+  }
 
-  players = data.players.map(p => ({
-    id: String(p.id),
-    name: cleanName(p.name),
-    peerId: p.peerId,
-    host: !!p.host,
-    x: Number(p.x) || 0,
-    y: Number(p.y) || 0,
-    z: Number(p.z) || 0
-  }));
+  players =
+    data.players.map(
+      p => ({
+        id: String(p.id),
+        name: cleanName(
+          p.name
+        ),
+        peerId: p.peerId,
+        host: !!p.host,
+        voice: !!p.voice,
+        x: Number(p.x) || 0,
+        y: Number(p.y) || 0,
+        z: Number(p.z) || 0
+      })
+    );
 
-  hostPeerId = data.hostPeerId || hostPeerId;
+  hostPeerId =
+    data.hostPeerId ||
+    hostPeerId;
 
-  roomCode = data.roomCode || roomCode;
+  roomCode =
+    data.roomCode ||
+    roomCode;
 
-  roomCodeText.textContent = roomCode;
+  roomCodeText.textContent =
+    roomCode;
 
   renderPlayers();
 
   rebuildWorldPlayers();
 
+  /*
+    Atualiza imediatamente o áudio
+    baseado no estado real da sala.
+  */
+  updateAllVoiceAudio();
+
   if (!isHost) {
 
-    const me = players.find(
-      p => p.id === myPlayerId
-    );
+    const me =
+      getPlayer(
+        myPlayerId
+      );
 
     if (me) {
-      connectionBadge.textContent = "Online";
-      joinPanel.classList.add("hidden");
+
+      connectionBadge.textContent =
+        "Online";
+
+      joinPanel.classList.add(
+        "hidden"
+      );
 
       showRoom();
 
@@ -706,68 +948,708 @@ function handleRoomState(data) {
 }
 
 /* =========================================================
-   PLAYER UPDATE
+   VOICE STATE
    ========================================================= */
 
-function handlePlayerUpdate(data) {
+function setMyVoiceState(
+  enabled
+) {
 
-  if (!data.player) return;
+  /*
+    Nunca permite voz durante
+    gravação ou reprodução.
+  */
 
-  const p = players.find(
-    x => x.id === data.player.id
-  );
+  if (voiceLocked) {
+    enabled = false;
+  }
 
-  if (!p) return;
+  voiceEnabled =
+    !!enabled;
 
-  p.x = Number(data.player.x) || 0;
-  p.y = Number(data.player.y) || 0;
-  p.z = Number(data.player.z) || 0;
+  const me =
+    getPlayer(
+      myPlayerId
+    );
 
-  updateRemoteCharacter(
-    p.id,
-    p.x,
-    p.y,
-    p.z
-  );
-}
+  if (me) {
+    me.voice =
+      voiceEnabled;
+  }
 
-function sendMyPosition() {
-
-  const me = players.find(
-    p => p.id === myPlayerId
-  );
-
-  if (!me || !myCharacter) return;
-
-  me.x = myCharacter.position.x;
-  me.y = myCharacter.position.y;
-  me.z = myCharacter.position.z;
-
-  const message = {
-    type: "PLAYER_UPDATE",
-    player: {
-      id: myPlayerId,
-      x: me.x,
-      y: me.y,
-      z: me.z
-    }
-  };
+  updateVoiceButton();
 
   if (isHost) {
-    broadcast(message);
+
+    broadcast({
+      type: "VOICE_STATE",
+      playerId: myPlayerId,
+      enabled: voiceEnabled
+    });
+
+    broadcastRoomState();
 
   } else {
 
-    const hostConn = connections.get(hostPeerId);
+    const host =
+      connections.get(
+        hostPeerId
+      );
 
-    if (hostConn) {
-      sendData(hostConn, message);
+    if (host) {
+
+      sendData(
+        host,
+        {
+          type: "VOICE_STATE",
+          playerId: myPlayerId,
+          enabled: voiceEnabled
+        }
+      );
+    }
+  }
+
+  updateAllVoiceAudio();
+}
+
+function handleVoiceState(
+  data
+) {
+
+  const player =
+    getPlayer(
+      data.playerId
+    );
+
+  if (!player) {
+    return;
+  }
+
+  player.voice =
+    !!data.enabled;
+
+  /*
+    O host é a autoridade.
+  */
+
+  if (isHost) {
+
+    broadcast(
+      {
+        type: "VOICE_STATE",
+        playerId:
+          player.id,
+        enabled:
+          player.voice
+      },
+      null
+    );
+
+    broadcastRoomState();
+  }
+
+  updateAllVoiceAudio();
+}
+
+function updateVoiceButton() {
+
+  const enabled =
+    voiceEnabled &&
+    !voiceLocked;
+
+  if (
+    micButton
+  ) {
+
+    if (enabled) {
+
+      micButton.classList.add(
+        "active"
+      );
+
+      micButton.classList.remove(
+        "off"
+      );
+
+      micButtonText.textContent =
+        "Microfone ligado";
+
+    } else {
+
+      micButton.classList.remove(
+        "active"
+      );
+
+      micButton.classList.add(
+        "off"
+      );
+
+      micButtonText.textContent =
+        "Microfone desligado";
+    }
+  }
+
+  if (
+    gameVoiceButton
+  ) {
+
+    if (enabled) {
+
+      gameVoiceButton.classList.add(
+        "active"
+      );
+
+      gameVoiceButton.textContent =
+        "Mic ON";
+
+    } else {
+
+      gameVoiceButton.classList.remove(
+        "active"
+      );
+
+      gameVoiceButton.textContent =
+        "Mic OFF";
     }
   }
 }
 
+/*
+  REGRA:
+  
+  A voz só fica audível para mim quando:
+
+  1. eu estou com voz ligada
+  2. o outro jogador está com voz ligada
+  3. não estamos gravando
+  4. não estamos reproduzindo
+*/
+
+function canHearPlayer(
+  playerId
+) {
+
+  if (voiceLocked) {
+    return false;
+  }
+
+  if (!voiceEnabled) {
+    return false;
+  }
+
+  const player =
+    getPlayer(
+      playerId
+    );
+
+  if (!player) {
+    return false;
+  }
+
+  return !!player.voice;
+}
+
+function updateAllVoiceAudio() {
+
+  const audios =
+    document.querySelectorAll(
+      "#remoteAudios audio"
+    );
+
+  for (
+    const audio of audios
+  ) {
+
+    const peerId =
+      audio.dataset.peer;
+
+    const player =
+      players.find(
+        p =>
+          p.peerId ===
+          peerId
+      );
+
+    if (!player) {
+
+      audio.muted = true;
+      audio.volume = 0;
+
+      continue;
+    }
+
+    const allowed =
+      canHearPlayer(
+        player.id
+      );
+
+    audio.muted =
+      !allowed;
+
+    audio.volume =
+      allowed ? 1 : 0;
+  }
+}
+
 /* =========================================================
-   PLAYER LIST
+   MICROPHONE
+   ========================================================= */
+
+async function requestMicrophone() {
+
+  if (localStream) {
+    return true;
+  }
+
+  try {
+
+    localStream =
+      await navigator.mediaDevices.getUserMedia(
+        {
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1,
+            sampleRate: 48000,
+            sampleSize: 16,
+            latency: 0
+          },
+          video: false
+        }
+      );
+
+    for (
+      const track of
+      localStream.getAudioTracks()
+    ) {
+      track.enabled = false;
+    }
+
+    return true;
+
+  } catch {
+
+    roomStatus.textContent =
+      "Permita o acesso ao microfone.";
+
+    return false;
+  }
+}
+
+async function toggleMic() {
+
+  /*
+    Durante gravação/reprodução
+    o botão não faz nada.
+  */
+
+  if (voiceLocked) {
+    return;
+  }
+
+  const ok =
+    await requestMicrophone();
+
+  if (!ok) {
+    return;
+  }
+
+  setMyVoiceState(
+    !voiceEnabled
+  );
+}
+
+/* =========================================================
+   VOICE CALLS
+   ========================================================= */
+
+/*
+  IMPORTANTE:
+
+  As conexões WebRTC podem existir mesmo quando
+  a voz está OFF.
+
+  Isso evita renegociação toda hora.
+
+  O áudio é simplesmente silenciado.
+*/
+
+function shouldInitiateVoice(
+  remotePeerId
+) {
+
+  return (
+    String(myPeerId) <
+    String(remotePeerId)
+  );
+}
+
+function ensureVoiceCall(
+  remotePeerId
+) {
+
+  if (!peer) {
+    return;
+  }
+
+  if (!localStream) {
+    return;
+  }
+
+  if (
+    voiceCalls.has(
+      remotePeerId
+    )
+  ) {
+    return;
+  }
+
+  if (
+    !shouldInitiateVoice(
+      remotePeerId
+    )
+  ) {
+    return;
+  }
+
+  try {
+
+    const call =
+      peer.call(
+        remotePeerId,
+        localStream
+      );
+
+    voiceCalls.set(
+      remotePeerId,
+      call
+    );
+
+    setupVoiceCall(
+      call,
+      remotePeerId
+    );
+
+  } catch {}
+}
+
+function ensureAllVoiceCalls() {
+
+  if (!localStream) {
+    return;
+  }
+
+  for (
+    const player of players
+  ) {
+
+    if (
+      player.id ===
+      myPlayerId
+    ) {
+      continue;
+    }
+
+    ensureVoiceCall(
+      player.peerId
+    );
+  }
+}
+
+function handleIncomingVoiceCall(
+  call
+) {
+
+  if (
+    !call ||
+    !call.peer
+  ) {
+    return;
+  }
+
+  if (
+    voiceCalls.has(
+      call.peer
+    )
+  ) {
+
+    try {
+      call.close();
+    } catch {}
+
+    return;
+  }
+
+  /*
+    Se ainda não temos stream,
+    criamos um stream vazio.
+  */
+
+  if (!localStream) {
+
+    const audioContext =
+      new (
+        window.AudioContext ||
+        window.webkitAudioContext
+      )();
+
+    const destination =
+      audioContext
+        .createMediaStreamDestination();
+
+    try {
+      call.answer(
+        destination.stream
+      );
+    } catch {}
+
+  } else {
+
+    try {
+      call.answer(
+        localStream
+      );
+    } catch {}
+  }
+
+  voiceCalls.set(
+    call.peer,
+    call
+  );
+
+  setupVoiceCall(
+    call,
+    call.peer
+  );
+}
+
+function setupVoiceCall(
+  call,
+  remotePeerId
+) {
+
+  call.on(
+    "stream",
+    stream => {
+
+      let audio =
+        document.querySelector(
+          `audio[data-peer="${CSS.escape(remotePeerId)}"]`
+        );
+
+      if (!audio) {
+
+        audio =
+          document.createElement(
+            "audio"
+          );
+
+        audio.autoplay = true;
+        audio.playsInline = true;
+
+        audio.dataset.peer =
+          remotePeerId;
+
+        $("remoteAudios")
+          .appendChild(
+            audio
+          );
+      }
+
+      audio.srcObject =
+        stream;
+
+      /*
+        O estado de voz decide
+        se pode ou não escutar.
+      */
+
+      updateAllVoiceAudio();
+
+      audio.play()
+        .catch(() => {});
+    }
+  );
+
+  call.on(
+    "close",
+    () => {
+
+      voiceCalls.delete(
+        remotePeerId
+      );
+
+      const audio =
+        document.querySelector(
+          `audio[data-peer="${CSS.escape(remotePeerId)}"]`
+        );
+
+      if (audio) {
+        audio.remove();
+      }
+    }
+  );
+
+  call.on(
+    "error",
+    () => {
+
+      voiceCalls.delete(
+        remotePeerId
+      );
+    }
+  );
+}
+
+function closeVoiceWithPlayer(
+  peerId
+) {
+
+  const call =
+    voiceCalls.get(
+      peerId
+    );
+
+  if (call) {
+
+    try {
+      call.close();
+    } catch {}
+
+    voiceCalls.delete(
+      peerId
+    );
+  }
+
+  const audio =
+    document.querySelector(
+      `audio[data-peer="${CSS.escape(peerId)}"]`
+    );
+
+  if (audio) {
+    audio.remove();
+  }
+}
+
+function closeAllVoice() {
+
+  for (
+    const call of
+    voiceCalls.values()
+  ) {
+
+    try {
+      call.close();
+    } catch {}
+  }
+
+  voiceCalls.clear();
+
+  const audios =
+    document.querySelectorAll(
+      "#remoteAudios audio"
+    );
+
+  audios.forEach(
+    audio => {
+      audio.pause();
+      audio.srcObject = null;
+      audio.remove();
+    }
+  );
+}
+
+/* =========================================================
+   VOICE LOCK
+   ========================================================= */
+
+function lockVoice() {
+
+  /*
+    Salva o estado antes da fase.
+  */
+
+  voiceBeforeLock =
+    voiceEnabled;
+
+  voiceLocked = true;
+
+  /*
+    Microfone local OFF.
+  */
+
+  if (localStream) {
+
+    for (
+      const track of
+      localStream.getAudioTracks()
+    ) {
+      track.enabled = false;
+    }
+  }
+
+  /*
+    Ninguém escuta ninguém.
+  */
+
+  const audios =
+    document.querySelectorAll(
+      "#remoteAudios audio"
+    );
+
+  audios.forEach(
+    audio => {
+
+      audio.muted = true;
+      audio.volume = 0;
+      audio.pause();
+    }
+  );
+
+  updateVoiceButton();
+}
+
+function unlockVoice() {
+
+  voiceLocked = false;
+
+  /*
+    Retorna ao estado que o jogador
+    tinha antes da gravação.
+  */
+
+  voiceEnabled =
+    voiceBeforeLock;
+
+  const me =
+    getPlayer(
+      myPlayerId
+    );
+
+  if (me) {
+    me.voice =
+      voiceEnabled;
+  }
+
+  if (localStream) {
+
+    for (
+      const track of
+      localStream.getAudioTracks()
+    ) {
+      track.enabled =
+        voiceEnabled;
+    }
+  }
+
+  updateVoiceButton();
+
+  updateAllVoiceAudio();
+}
+
+/* =========================================================
+   PLAYERS
    ========================================================= */
 
 function renderPlayers() {
@@ -780,33 +1662,59 @@ function renderPlayers() {
   gamePlayerCount.textContent =
     String(players.length);
 
-  for (const player of players) {
+  for (
+    const player of players
+  ) {
 
-    const item = document.createElement("div");
+    const item =
+      document.createElement(
+        "div"
+      );
 
-    item.className = "player-item";
+    item.className =
+      "player-item";
 
-    const avatar = document.createElement("div");
+    const avatar =
+      document.createElement(
+        "div"
+      );
 
-    avatar.className = "player-avatar";
+    avatar.className =
+      "player-avatar";
 
     avatar.textContent =
-      player.name.charAt(0).toUpperCase();
+      player.name
+        .charAt(0)
+        .toUpperCase();
 
-    const info = document.createElement("div");
+    const info =
+      document.createElement(
+        "div"
+      );
 
-    info.className = "player-info";
+    info.className =
+      "player-info";
 
-    const name = document.createElement("strong");
+    const name =
+      document.createElement(
+        "strong"
+      );
 
-    name.textContent = player.name;
+    name.textContent =
+      player.name;
 
-    const status = document.createElement("span");
+    const status =
+      document.createElement(
+        "span"
+      );
 
     status.textContent =
-      player.id === myPlayerId
+      player.id ===
+      myPlayerId
         ? "Você"
-        : "Jogador";
+        : player.voice
+          ? "Voz ligada"
+          : "Voz desligada";
 
     info.appendChild(name);
     info.appendChild(status);
@@ -816,21 +1724,34 @@ function renderPlayers() {
 
     if (player.host) {
 
-      const hostTag = document.createElement("div");
+      const hostTag =
+        document.createElement(
+          "div"
+        );
 
-      hostTag.className = "host-tag";
+      hostTag.className =
+        "host-tag";
 
-      hostTag.textContent = "HOST";
+      hostTag.textContent =
+        "HOST";
 
-      item.appendChild(hostTag);
+      item.appendChild(
+        hostTag
+      );
     }
 
-    playersList.appendChild(item);
+    playersList.appendChild(
+      item
+    );
   }
 
-  if (isHost) {
-    startGameButton.disabled = players.length < 1;
-    startGameButton.style.opacity = "1";
+  /*
+    Depois de atualizar a lista,
+    tenta estabelecer as conexões de voz.
+  */
+
+  if (localStream) {
+    ensureAllVoiceCalls();
   }
 }
 
@@ -840,359 +1761,270 @@ function renderPlayers() {
 
 function setupRoomUI() {
 
-  roomCodeText.textContent = roomCode;
+  roomCodeText.textContent =
+    roomCode;
 
   renderPlayers();
 
   if (isHost) {
 
-    startGameButton.classList.remove("hidden");
-
-    startGameButton.textContent =
-      "Começar partida";
+    startGameButton.classList.remove(
+      "hidden"
+    );
 
   } else {
 
-    startGameButton.classList.add("hidden");
+    startGameButton.classList.add(
+      "hidden"
+    );
   }
+}
+
+/* =========================================================
+   POSITION
+   ========================================================= */
+
+function randomSpawnX() {
+  return (
+    Math.random() * 8
+  ) - 4;
+}
+
+function randomSpawnZ() {
+  return (
+    Math.random() * 5
+  ) - 1;
+}
+
+function handlePlayerUpdate(
+  data
+) {
+
+  if (!data.player) {
+    return;
+  }
+
+  const player =
+    getPlayer(
+      data.player.id
+    );
+
+  if (!player) {
+    return;
+  }
+
+  player.x =
+    Number(data.player.x) || 0;
+
+  player.y =
+    Number(data.player.y) || 0;
+
+  player.z =
+    Number(data.player.z) || 0;
+
+  updateRemoteCharacter(
+    player.id,
+    player.x,
+    player.y,
+    player.z
+  );
+}
+
+function sendMyPosition() {
+
+  if (!myCharacter) {
+    return;
+  }
+
+  const me =
+    getPlayer(
+      myPlayerId
+    );
+
+  if (!me) {
+    return;
+  }
+
+  me.x =
+    myCharacter.position.x;
+
+  me.y =
+    myCharacter.position.y;
+
+  me.z =
+    myCharacter.position.z;
+
+  const data = {
+    type: "PLAYER_UPDATE",
+
+    player: {
+      id: myPlayerId,
+      x: me.x,
+      y: me.y,
+      z: me.z
+    }
+  };
+
+  if (isHost) {
+
+    broadcast(data);
+
+  } else {
+
+    const host =
+      connections.get(
+        hostPeerId
+      );
+
+    if (host) {
+      sendData(
+        host,
+        data
+      );
+    }
+  }
+}
+
+function sendPositionThrottled() {
+
+  const now =
+    performance.now();
+
+  if (
+    now -
+    lastPositionSend <
+    60
+  ) {
+    return;
+  }
+
+  lastPositionSend =
+    now;
+
+  sendMyPosition();
 }
 
 /* =========================================================
    HOST CLEANUP
    ========================================================= */
 
+let hostCleanupTimer = null;
+let heartbeatTimer = null;
+
 function startHostCleanup() {
 
-  if (!isHost) return;
+  clearInterval(
+    hostCleanupTimer
+  );
 
-  clearInterval(hostCleanupTimer);
+  hostCleanupTimer =
+    setInterval(
+      () => {
 
-  hostCleanupTimer = setInterval(() => {
+        for (
+          const [
+            peerId,
+            conn
+          ] of connections
+        ) {
 
-    for (const [peerId, conn] of connections) {
+          if (!conn.open) {
 
-      if (!conn.open) {
+            connections.delete(
+              peerId
+            );
 
-        connections.delete(peerId);
+            const player =
+              players.find(
+                p =>
+                  p.peerId ===
+                  peerId
+              );
 
-        const player = players.find(
-          p => p.peerId === peerId
-        );
+            if (player) {
 
-        if (player) {
+              players =
+                players.filter(
+                  p =>
+                    p.id !==
+                    player.id
+                );
 
-          players = players.filter(
-            p => p.id !== player.id
-          );
-
-          removeWorldPlayer(player.id);
+              removeWorldPlayer(
+                player.id
+              );
+            }
+          }
         }
-      }
-    }
 
-    broadcastRoomState();
+        broadcastRoomState();
 
-  }, 5000);
+      },
+      5000
+    );
 }
-
-/* =========================================================
-   HEARTBEAT
-   ========================================================= */
 
 function startHeartbeat() {
 
   stopHeartbeat();
 
-  heartbeatTimer = setInterval(() => {
+  heartbeatTimer =
+    setInterval(
+      () => {
 
-    for (const conn of connections.values()) {
+        for (
+          const conn of
+          connections.values()
+        ) {
 
-      sendData(conn, {
-        type: "PING",
-        time: Date.now()
-      });
-    }
+          sendData(
+            conn,
+            {
+              type: "PING"
+            }
+          );
+        }
 
-  }, 3000);
+      },
+      3000
+    );
 }
 
 function stopHeartbeat() {
 
   if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
+
+    clearInterval(
+      heartbeatTimer
+    );
+
     heartbeatTimer = null;
   }
 }
 
 /* =========================================================
-   VOICE
-   ========================================================= */
-
-async function requestMicrophone() {
-
-  if (localStream) return true;
-
-  try {
-
-    localStream =
-      await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 1,
-          sampleRate: 48000,
-          sampleSize: 16,
-          latency: 0
-        },
-        video: false
-      });
-
-    for (const track of localStream.getAudioTracks()) {
-      track.enabled = false;
-    }
-
-    return true;
-
-  } catch (error) {
-
-    roomStatus.textContent =
-      "Permita o acesso ao microfone.";
-
-    return false;
-  }
-}
-
-async function toggleMic() {
-
-  const ok = await requestMicrophone();
-
-  if (!ok) return;
-
-  micEnabled = !micEnabled;
-
-  for (const track of localStream.getAudioTracks()) {
-    track.enabled = micEnabled;
-  }
-
-  updateMicButton();
-
-  if (micEnabled) {
-    startVoiceCalls();
-  }
-}
-
-function updateMicButton() {
-
-  if (micEnabled) {
-
-    micButton.classList.remove("off");
-    micButton.classList.add("active");
-
-    micButtonText.textContent =
-      "Microfone ligado";
-
-  } else {
-
-    micButton.classList.remove("active");
-    micButton.classList.add("off");
-
-    micButtonText.textContent =
-      "Microfone desligado";
-  }
-}
-
-/*
-  A chamada de voz é criada somente por quem tem o
-  menor peerId entre os dois jogadores.
-
-  Isso evita duas chamadas simultâneas para o mesmo jogador.
-*/
-
-function shouldInitiateVoice(remotePeerId) {
-
-  return String(myPeerId) < String(remotePeerId);
-}
-
-function setupVoiceForPeer(remotePeerId) {
-
-  if (!remotePeerId) return;
-
-  if (voiceCalls.has(remotePeerId)) return;
-
-  if (!shouldInitiateVoice(remotePeerId)) return;
-
-  if (!localStream) return;
-
-  try {
-
-    const call = peer.call(
-      remotePeerId,
-      localStream
-    );
-
-    voiceCalls.set(remotePeerId, call);
-
-    setupVoiceCall(call, remotePeerId);
-
-  } catch {}
-}
-
-function startVoiceCalls() {
-
-  if (!peer || !localStream) return;
-
-  for (const player of players) {
-
-    if (player.id === myPlayerId) continue;
-
-    setupVoiceForPeer(player.peerId);
-  }
-}
-
-function handleIncomingVoiceCall(call) {
-
-  if (!call || !call.peer) return;
-
-  if (voiceCalls.has(call.peer)) {
-    try {
-      call.close();
-    } catch {}
-
-    return;
-  }
-
-  /*
-    Respondemos mesmo quando o nosso mic está OFF.
-    Assim continuamos recebendo a voz do outro jogador.
-  */
-
-  if (!localStream) {
-
-    createReceiveOnlyStream().then(stream => {
-
-      try {
-        call.answer(stream);
-      } catch {}
-    });
-
-  } else {
-
-    try {
-      call.answer(localStream);
-    } catch {}
-  }
-
-  voiceCalls.set(call.peer, call);
-
-  setupVoiceCall(call, call.peer);
-}
-
-async function createReceiveOnlyStream() {
-
-  const context =
-    new AudioContext();
-
-  const destination =
-    context.createMediaStreamDestination();
-
-  return destination.stream;
-}
-
-function setupVoiceCall(call, remotePeerId) {
-
-  call.on("stream", stream => {
-
-    let audio =
-      document.querySelector(
-        `audio[data-peer="${CSS.escape(remotePeerId)}"]`
-      );
-
-    if (!audio) {
-
-      audio =
-        document.createElement("audio");
-
-      audio.autoplay = true;
-      audio.playsInline = true;
-
-      audio.dataset.peer =
-        remotePeerId;
-
-      $("remoteAudios").appendChild(audio);
-    }
-
-    audio.srcObject = stream;
-
-    audio.volume = 1;
-
-    audio.play().catch(() => {});
-  });
-
-  call.on("close", () => {
-
-    voiceCalls.delete(remotePeerId);
-
-    const audio =
-      document.querySelector(
-        `audio[data-peer="${CSS.escape(remotePeerId)}"]`
-      );
-
-    if (audio) {
-      audio.remove();
-    }
-  });
-
-  call.on("error", () => {
-    voiceCalls.delete(remotePeerId);
-  });
-}
-
-/* =========================================================
-   GAME VOICE
-   ========================================================= */
-
-function toggleGameVoice() {
-
-  if (!localStream) {
-    toggleMic();
-    return;
-  }
-
-  micEnabled = !micEnabled;
-
-  for (const track of localStream.getAudioTracks()) {
-    track.enabled = micEnabled;
-  }
-
-  if (micEnabled) {
-
-    gameVoiceButton.textContent =
-      "Mic ON";
-
-    gameVoiceButton.classList.add("active");
-
-  } else {
-
-    gameVoiceButton.textContent =
-      "Mic OFF";
-
-    gameVoiceButton.classList.remove("active");
-  }
-}
-
-/* =========================================================
-   START GAME
+   GAME START
    ========================================================= */
 
 function startGame() {
 
-  if (!isHost) return;
+  if (!isHost) {
+    return;
+  }
 
-  if (gameRunning) return;
+  if (gameRunning) {
+    return;
+  }
 
   gameRunning = true;
+
   currentRound = 1;
+
+  /*
+    Antes da partida começa sem voz.
+  */
+
+  lockVoice();
 
   broadcast({
     type: "START_GAME",
@@ -1202,14 +2034,20 @@ function startGame() {
   enterGame();
 }
 
-function handleStartGame(data) {
+function handleStartGame(
+  data
+) {
 
-  if (isHost) return;
+  if (isHost) {
+    return;
+  }
 
   gameRunning = true;
 
   currentRound =
     Number(data.round) || 1;
+
+  lockVoice();
 
   enterGame();
 }
@@ -1224,20 +2062,6 @@ function enterGame() {
   gamePlayerCount.textContent =
     String(players.length);
 
-  gameVoiceButton.textContent =
-    "Mic OFF";
-
-  gameVoiceButton.classList.remove("active");
-
-  if (localStream) {
-
-    micEnabled = false;
-
-    for (const track of localStream.getAudioTracks()) {
-      track.enabled = false;
-    }
-  }
-
   startRound();
 }
 
@@ -1247,16 +2071,26 @@ function enterGame() {
 
 function startRound() {
 
+  currentPhase =
+    "countdown";
+
   gameRound.textContent =
     `${currentRound}/4`;
 
   gameMessage.textContent =
     "Prepare-se...";
 
-  gameCenter.classList.remove("hidden");
+  recordingPanel.classList.add(
+    "hidden"
+  );
 
-  recordingPanel.classList.add("hidden");
-  playbackPanel.classList.add("hidden");
+  playbackPanel.classList.add(
+    "hidden"
+  );
+
+  gameCenter.classList.remove(
+    "hidden"
+  );
 
   let value = 3;
 
@@ -1264,25 +2098,32 @@ function startRound() {
     value;
 
   const timer =
-    setInterval(() => {
+    setInterval(
+      () => {
 
-      value--;
+        value--;
 
-      if (value <= 0) {
+        if (value <= 0) {
 
-        clearInterval(timer);
+          clearInterval(
+            timer
+          );
 
-        gameCenter.classList.add("hidden");
+          gameCenter.classList.add(
+            "hidden"
+          );
 
-        showReference();
+          showReference();
 
-        return;
-      }
+          return;
+        }
 
-      countdownNumber.textContent =
-        value;
+        countdownNumber.textContent =
+          value;
 
-    }, 1000);
+      },
+      1000
+    );
 }
 
 /* =========================================================
@@ -1291,25 +2132,39 @@ function startRound() {
 
 function showReference() {
 
+  currentPhase =
+    "reference";
+
+  /*
+    Voz continua bloqueada.
+    Só o som de referência é reproduzido.
+  */
+
+  lockVoice();
+
   gameMessage.textContent =
     "Ouça o som de referência";
 
   playReferenceSound();
 
-  setTimeout(() => {
+  setTimeout(
+    () => {
 
-    startRecording();
+      startRecording();
 
-  }, 2500);
+    },
+    2500
+  );
 }
 
 function playReferenceSound() {
 
+  const AudioContextClass =
+    window.AudioContext ||
+    window.webkitAudioContext;
+
   const context =
-    new (
-      window.AudioContext ||
-      window.webkitAudioContext
-    )();
+    new AudioContextClass();
 
   const now =
     context.currentTime;
@@ -1320,50 +2175,68 @@ function playReferenceSound() {
     520
   ];
 
-  notes.forEach((frequency, index) => {
+  notes.forEach(
+    (
+      frequency,
+      index
+    ) => {
 
-    const osc =
-      context.createOscillator();
+      const osc =
+        context.createOscillator();
 
-    const gain =
-      context.createGain();
+      const gain =
+        context.createGain();
 
-    osc.type = "sine";
+      osc.type =
+        "sine";
 
-    osc.frequency.value =
-      frequency;
+      osc.frequency.value =
+        frequency;
 
-    const start =
-      now + index * 0.38;
+      const start =
+        now +
+        index * 0.38;
 
-    const end =
-      start + 0.26;
+      const end =
+        start +
+        0.26;
 
-    gain.gain.setValueAtTime(
-      0,
-      start
-    );
+      gain.gain.setValueAtTime(
+        0,
+        start
+      );
 
-    gain.gain.linearRampToValueAtTime(
-      0.25,
-      start + 0.03
-    );
+      gain.gain.linearRampToValueAtTime(
+        0.25,
+        start + 0.03
+      );
 
-    gain.gain.linearRampToValueAtTime(
-      0,
-      end
-    );
+      gain.gain.linearRampToValueAtTime(
+        0,
+        end
+      );
 
-    osc.connect(gain);
-    gain.connect(context.destination);
+      osc.connect(gain);
 
-    osc.start(start);
-    osc.stop(end + 0.03);
-  });
+      gain.connect(
+        context.destination
+      );
 
-  setTimeout(() => {
-    context.close().catch(() => {});
-  }, 2200);
+      osc.start(start);
+
+      osc.stop(
+        end + 0.03
+      );
+    }
+  );
+
+  setTimeout(
+    () => {
+      context.close()
+        .catch(() => {});
+    },
+    2200
+  );
 }
 
 /* =========================================================
@@ -1372,10 +2245,24 @@ function playReferenceSound() {
 
 async function startRecording() {
 
-  recordingPanel.classList.remove("hidden");
+  currentPhase =
+    "recording";
+
+  /*
+    ESSENCIAL:
+
+    A voz fica travada ANTES
+    de abrir a gravação.
+  */
+
+  lockVoice();
+
+  recordingPanel.classList.remove(
+    "hidden"
+  );
 
   gameMessage.textContent =
-    "Sua vez";
+    "Grave agora";
 
   recordTimerElement.textContent =
     "7";
@@ -1394,32 +2281,45 @@ async function startRecording() {
   }
 
   /*
-    Durante a gravação o microfone fica ON.
+    O microfone é usado SOMENTE
+    pelo MediaRecorder.
+
+    Ele não é liberado para
+    voice chat.
   */
 
-  micEnabled = true;
-
-  for (const track of localStream.getAudioTracks()) {
+  for (
+    const track of
+    localStream.getAudioTracks()
+  ) {
     track.enabled = true;
   }
 
   recordedChunks = [];
 
+  const mimeType =
+    getSupportedMimeType();
+
   try {
 
     mediaRecorder =
-      new MediaRecorder(
-        localStream,
-        {
-          mimeType:
-            getSupportedMimeType()
-        }
-      );
+      mimeType
+        ? new MediaRecorder(
+            localStream,
+            {
+              mimeType
+            }
+          )
+        : new MediaRecorder(
+            localStream
+          );
 
   } catch {
 
     mediaRecorder =
-      new MediaRecorder(localStream);
+      new MediaRecorder(
+        localStream
+      );
   }
 
   mediaRecorder.ondataavailable =
@@ -1429,6 +2329,7 @@ async function startRecording() {
         event.data &&
         event.data.size > 0
       ) {
+
         recordedChunks.push(
           event.data
         );
@@ -1448,10 +2349,14 @@ async function startRecording() {
           }
         );
 
-      handleOwnRecording(blob);
+      handleOwnRecording(
+        blob
+      );
     };
 
-  mediaRecorder.start(100);
+  mediaRecorder.start(
+    100
+  );
 
   let seconds = 7;
 
@@ -1461,40 +2366,53 @@ async function startRecording() {
   const started =
     performance.now();
 
-  clearInterval(recordTimer);
+  clearInterval(
+    recordTimer
+  );
 
   recordTimer =
-    setInterval(() => {
+    setInterval(
+      () => {
 
-      const elapsed =
-        performance.now() - started;
+        const elapsed =
+          performance.now() -
+          started;
 
-      const progress =
-        Math.min(
-          elapsed / 7000,
-          1
-        );
+        const progress =
+          Math.min(
+            elapsed / 7000,
+            1
+          );
 
-      recordProgress.style.transform =
-        `scaleX(${1 - progress})`;
+        recordProgress.style.transform =
+          `scaleX(${1 - progress})`;
 
-      seconds =
-        Math.max(
-          0,
-          7 - Math.floor(elapsed / 1000)
-        );
+        seconds =
+          Math.max(
+            0,
+            7 -
+              Math.floor(
+                elapsed / 1000
+              )
+          );
 
-      recordTimerElement.textContent =
-        seconds;
+        recordTimerElement.textContent =
+          seconds;
 
-      if (elapsed >= 7000) {
+        if (
+          elapsed >= 7000
+        ) {
 
-        clearInterval(recordTimer);
+          clearInterval(
+            recordTimer
+          );
 
-        stopRecording();
-      }
+          stopRecording();
+        }
 
-    }, 50);
+      },
+      50
+    );
 }
 
 function getSupportedMimeType() {
@@ -1505,11 +2423,15 @@ function getSupportedMimeType() {
     "audio/mp4"
   ];
 
-  for (const type of types) {
+  for (
+    const type of types
+  ) {
 
     if (
       MediaRecorder.isTypeSupported &&
-      MediaRecorder.isTypeSupported(type)
+      MediaRecorder.isTypeSupported(
+        type
+      )
     ) {
       return type;
     }
@@ -1520,56 +2442,87 @@ function getSupportedMimeType() {
 
 function stopRecording() {
 
+  /*
+    Para imediatamente a captura.
+  */
+
   if (
     mediaRecorder &&
-    mediaRecorder.state !== "inactive"
+    mediaRecorder.state !==
+      "inactive"
   ) {
+
     mediaRecorder.stop();
   }
 }
 
 function finishRecordingWithoutAudio() {
 
-  const blob =
+  handleOwnRecording(
     new Blob(
       [],
       {
         type: "audio/webm"
       }
-    );
-
-  handleOwnRecording(blob);
+    )
+  );
 }
 
 /* =========================================================
-   OWN RECORDING
+   PLAYBACK
    ========================================================= */
 
-function handleOwnRecording(blob) {
+function handleOwnRecording(
+  blob
+) {
+
+  currentPhase =
+    "playback";
 
   /*
-    A V1 mantém a gravação local por enquanto.
-    A próxima camada do sistema pode enviar esse Blob
-    para o host via DataConnection.
+    IMPORTANTE:
+
+    Microfone OFF.
+
+    Voz continua bloqueada.
+
+    Então ninguém conversa enquanto
+    a gravação é reproduzida.
   */
 
   if (localStream) {
 
-    micEnabled = false;
-
-    for (const track of localStream.getAudioTracks()) {
+    for (
+      const track of
+      localStream.getAudioTracks()
+    ) {
       track.enabled = false;
     }
   }
 
-  recordingPanel.classList.add("hidden");
+  lockVoice();
 
-  playLocalTake(blob);
+  recordingPanel.classList.add(
+    "hidden"
+  );
+
+  playLocalTake(
+    blob
+  );
 }
 
-function playLocalTake(blob) {
+function playLocalTake(
+  blob
+) {
 
-  playbackPanel.classList.remove("hidden");
+  currentPhase =
+    "playback";
+
+  lockVoice();
+
+  playbackPanel.classList.remove(
+    "hidden"
+  );
 
   playbackName.textContent =
     username;
@@ -1580,85 +2533,109 @@ function playLocalTake(blob) {
   playbackScore.textContent =
     "—";
 
-  if (!blob || blob.size === 0) {
+  if (
+    !blob ||
+    blob.size === 0
+  ) {
 
     playbackStatus.textContent =
-      "Nenhuma gravação recebida.";
+      "Nenhuma gravação.";
 
     playbackScore.textContent =
       "0";
 
-    finishRound();
+    setTimeout(
+      finishRound,
+      1200
+    );
 
     return;
   }
 
   const url =
-    URL.createObjectURL(blob);
+    URL.createObjectURL(
+      blob
+    );
 
   const audio =
     new Audio();
 
-  audio.src = url;
+  audio.src =
+    url;
 
   audio.volume = 1;
 
-  audio.onended = () => {
+  audio.onended =
+    () => {
 
-    URL.revokeObjectURL(url);
-
-    /*
-      Pontuação provisória da V1.
-      O sistema de análise de áudio entra na próxima etapa.
-    */
-
-    const score =
-      Math.max(
-        1,
-        Math.min(
-          100,
-          Math.floor(
-            45 +
-            Math.random() * 45
-          )
-        )
+      URL.revokeObjectURL(
+        url
       );
 
-    playbackScore.textContent =
-      String(score);
+      /*
+        Pontuação temporária.
+      */
 
-    playbackStatus.textContent =
-      "Resultado";
+      const score =
+        Math.max(
+          1,
+          Math.min(
+            100,
+            Math.floor(
+              45 +
+              Math.random() * 45
+            )
+          )
+        );
 
-    setTimeout(() => {
-      finishRound();
-    }, 1600);
-  };
+      playbackScore.textContent =
+        String(score);
 
-  audio.onerror = () => {
+      playbackStatus.textContent =
+        "Resultado";
 
-    URL.revokeObjectURL(url);
-
-    playbackScore.textContent =
-      "0";
-
-    playbackStatus.textContent =
-      "Erro ao reproduzir.";
-
-    setTimeout(() => {
-      finishRound();
-    }, 1200);
-  };
-
-  audio.play().catch(() => {
-
-    playbackStatus.textContent =
-      "Toque na tela para liberar o áudio.";
-
-    playbackPanel.onclick = () => {
-      audio.play().catch(() => {});
+      setTimeout(
+        finishRound,
+        1600
+      );
     };
-  });
+
+  audio.onerror =
+    () => {
+
+      URL.revokeObjectURL(
+        url
+      );
+
+      playbackScore.textContent =
+        "0";
+
+      playbackStatus.textContent =
+        "Erro ao reproduzir.";
+
+      setTimeout(
+        finishRound,
+        1200
+      );
+    };
+
+  audio.play()
+    .catch(
+      () => {
+
+        playbackStatus.textContent =
+          "Toque na tela para reproduzir.";
+
+        playbackPanel.onclick =
+          () => {
+
+            audio.play()
+              .catch(
+                () => {}
+              );
+          };
+      }
+    );
 }
 
 /* =========================================================
@@ -1667,9 +2644,22 @@ function playLocalTake(blob) {
 
 function finishRound() {
 
-  playbackPanel.classList.add("hidden");
+  playbackPanel.classList.add(
+    "hidden"
+  );
 
-  if (currentRound >= 4) {
+  /*
+    Só aqui a voz pode voltar.
+  */
+
+  unlockVoice();
+
+  currentPhase =
+    "idle";
+
+  if (
+    currentRound >= 4
+  ) {
 
     finishGame();
 
@@ -1678,58 +2668,93 @@ function finishRound() {
 
   currentRound++;
 
-  setTimeout(() => {
+  setTimeout(
+    () => {
 
-    startRound();
+      startRound();
 
-  }, 900);
+    },
+    700
+  );
 }
 
 function finishGame() {
 
+  currentPhase =
+    "finished";
+
+  lockVoice();
+
   gameMessage.textContent =
     "Partida finalizada";
 
-  playbackPanel.classList.remove("hidden");
+  playbackPanel.classList.remove(
+    "hidden"
+  );
 
   playbackName.textContent =
     "Shadow Games";
 
   playbackStatus.textContent =
-    "A V1 da partida terminou.";
+    "Partida finalizada.";
 
   playbackScore.textContent =
     "GG";
 
-  setTimeout(() => {
+  setTimeout(
+    () => {
 
-    gameRunning = false;
+      gameRunning = false;
 
-    playbackPanel.classList.add("hidden");
+      playbackPanel.classList.add(
+        "hidden"
+      );
 
-    showRoom();
+      /*
+        Ao voltar para a sala,
+        o jogador pode ligar a voz novamente.
+      */
 
-  }, 3000);
+      currentPhase =
+        "idle";
+
+      voiceLocked = false;
+      voiceBeforeLock = false;
+      voiceEnabled = false;
+
+      const me =
+        getPlayer(
+          myPlayerId
+        );
+
+      if (me) {
+        me.voice = false;
+      }
+
+      if (localStream) {
+
+        for (
+          const track of
+          localStream.getAudioTracks()
+        ) {
+          track.enabled = false;
+        }
+      }
+
+      updateVoiceButton();
+
+      showRoom();
+
+      updateAllVoiceAudio();
+
+    },
+    2200
+  );
 }
 
 /* =========================================================
-   WORLD / THREE.JS
+   3D WORLD
    ========================================================= */
-
-let scene;
-let renderer;
-let camera;
-
-let clock;
-
-const worldPlayers = new Map();
-
-const keys = {
-  forward: false,
-  backward: false,
-  left: false,
-  right: false
-};
 
 function init3D() {
 
@@ -1737,7 +2762,9 @@ function init3D() {
     new THREE.Scene();
 
   scene.background =
-    new THREE.Color(0x050509);
+    new THREE.Color(
+      0x050509
+    );
 
   scene.fog =
     new THREE.Fog(
@@ -1749,7 +2776,8 @@ function init3D() {
   camera =
     new THREE.PerspectiveCamera(
       62,
-      window.innerWidth / window.innerHeight,
+      window.innerWidth /
+        window.innerHeight,
       0.1,
       100
     );
@@ -1761,10 +2789,13 @@ function init3D() {
   );
 
   renderer =
-    new THREE.WebGLRenderer({
-      antialias: true,
-      powerPreference: "high-performance"
-    });
+    new THREE.WebGLRenderer(
+      {
+        antialias: true,
+        powerPreference:
+          "high-performance"
+      }
+    );
 
   renderer.setPixelRatio(
     Math.min(
@@ -1778,18 +2809,13 @@ function init3D() {
     window.innerHeight
   );
 
-  renderer.shadowMap.enabled = false;
-
-  $("gameCanvas").appendChild(
-    renderer.domElement
-  );
-
-  clock =
-    new THREE.Clock();
+  $("gameCanvas")
+    .appendChild(
+      renderer.domElement
+    );
 
   createLights();
   createEnvironment();
-  createLocalCharacter();
 
   window.addEventListener(
     "resize",
@@ -1797,9 +2823,15 @@ function init3D() {
   );
 
   setupCameraControls();
+  setupJoystick();
+  setupKeyboard();
 
   animate3D();
 }
+
+/* =========================================================
+   LIGHTS
+   ========================================================= */
 
 function createLights() {
 
@@ -1810,21 +2842,25 @@ function createLights() {
       2.1
     );
 
-  scene.add(ambient);
+  scene.add(
+    ambient
+  );
 
-  const light =
+  const directional =
     new THREE.DirectionalLight(
       0xffffff,
       1.5
     );
 
-  light.position.set(
+  directional.position.set(
     4,
     10,
     4
   );
 
-  scene.add(light);
+  scene.add(
+    directional
+  );
 
   const purple =
     new THREE.PointLight(
@@ -1839,7 +2875,9 @@ function createLights() {
     -5
   );
 
-  scene.add(purple);
+  scene.add(
+    purple
+  );
 
   const purple2 =
     new THREE.PointLight(
@@ -1854,34 +2892,38 @@ function createLights() {
     6
   );
 
-  scene.add(purple2);
+  scene.add(
+    purple2
+  );
 }
+
+/* =========================================================
+   ENVIRONMENT
+   ========================================================= */
 
 function createEnvironment() {
 
-  const floorGeometry =
-    new THREE.PlaneGeometry(
-      80,
-      80
-    );
-
-  const floorMaterial =
-    new THREE.MeshStandardMaterial({
-      color: 0x0d0d14,
-      roughness: 0.88,
-      metalness: 0.08
-    });
-
   const floor =
     new THREE.Mesh(
-      floorGeometry,
-      floorMaterial
+      new THREE.PlaneGeometry(
+        80,
+        80
+      ),
+      new THREE.MeshStandardMaterial(
+        {
+          color: 0x0d0d14,
+          roughness: 0.88,
+          metalness: 0.08
+        }
+      )
     );
 
   floor.rotation.x =
     -Math.PI / 2;
 
-  scene.add(floor);
+  scene.add(
+    floor
+  );
 
   const grid =
     new THREE.GridHelper(
@@ -1894,7 +2936,9 @@ function createEnvironment() {
   grid.position.y =
     0.01;
 
-  scene.add(grid);
+  scene.add(
+    grid
+  );
 
   createBuilding(
     0,
@@ -1960,23 +3004,19 @@ function createBuilding(
   sz
 ) {
 
-  const geometry =
-    new THREE.BoxGeometry(
-      sx,
-      sy,
-      sz
-    );
-
-  const material =
-    new THREE.MeshStandardMaterial({
-      color: 0x11111a,
-      roughness: 0.7
-    });
-
   const mesh =
     new THREE.Mesh(
-      geometry,
-      material
+      new THREE.BoxGeometry(
+        sx,
+        sy,
+        sz
+      ),
+      new THREE.MeshStandardMaterial(
+        {
+          color: 0x11111a,
+          roughness: 0.7
+        }
+      )
     );
 
   mesh.position.set(
@@ -1985,7 +3025,9 @@ function createBuilding(
     z
   );
 
-  scene.add(mesh);
+  scene.add(
+    mesh
+  );
 }
 
 function createPlatform(
@@ -1997,24 +3039,20 @@ function createPlatform(
   sz
 ) {
 
-  const geometry =
-    new THREE.BoxGeometry(
-      sx,
-      sy,
-      sz
-    );
-
-  const material =
-    new THREE.MeshStandardMaterial({
-      color: 0x17131f,
-      roughness: 0.6,
-      metalness: 0.2
-    });
-
   const mesh =
     new THREE.Mesh(
-      geometry,
-      material
+      new THREE.BoxGeometry(
+        sx,
+        sy,
+        sz
+      ),
+      new THREE.MeshStandardMaterial(
+        {
+          color: 0x17131f,
+          roughness: 0.6,
+          metalness: 0.2
+        }
+      )
     );
 
   mesh.position.set(
@@ -2023,7 +3061,9 @@ function createPlatform(
     z
   );
 
-  scene.add(mesh);
+  scene.add(
+    mesh
+  );
 
   const ring =
     new THREE.Mesh(
@@ -2032,12 +3072,14 @@ function createPlatform(
         3.25,
         48
       ),
-      new THREE.MeshBasicMaterial({
-        color: 0x8145ff,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.65
-      })
+      new THREE.MeshBasicMaterial(
+        {
+          color: 0x8145ff,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.65
+        }
+      )
     );
 
   ring.rotation.x =
@@ -2049,7 +3091,9 @@ function createPlatform(
     z
   );
 
-  scene.add(ring);
+  scene.add(
+    ring
+  );
 }
 
 function createNeonBlock(
@@ -2058,24 +3102,20 @@ function createNeonBlock(
   z
 ) {
 
-  const geometry =
-    new THREE.BoxGeometry(
-      1.2,
-      2,
-      1.2
-    );
-
-  const material =
-    new THREE.MeshStandardMaterial({
-      color: 0x3a2164,
-      emissive: 0x6e35bb,
-      emissiveIntensity: 1.4
-    });
-
   const mesh =
     new THREE.Mesh(
-      geometry,
-      material
+      new THREE.BoxGeometry(
+        1.2,
+        2,
+        1.2
+      ),
+      new THREE.MeshStandardMaterial(
+        {
+          color: 0x3a2164,
+          emissive: 0x6e35bb,
+          emissiveIntensity: 1.4
+        }
+      )
     );
 
   mesh.position.set(
@@ -2084,32 +3124,21 @@ function createNeonBlock(
     z
   );
 
-  scene.add(mesh);
+  scene.add(
+    mesh
+  );
 }
 
 /* =========================================================
-   CHARACTERS
+   CHARACTER
    ========================================================= */
 
-function createCharacter(player) {
+function createCharacter(
+  player
+) {
 
   const group =
     new THREE.Group();
-
-  const bodyMaterial =
-    new THREE.MeshStandardMaterial({
-      color:
-        player.id === myPlayerId
-          ? 0x8b4cff
-          : 0x555565,
-      roughness: 0.55
-    });
-
-  const skinMaterial =
-    new THREE.MeshStandardMaterial({
-      color: 0xf0b28b,
-      roughness: 0.7
-    });
 
   const body =
     new THREE.Mesh(
@@ -2119,13 +3148,23 @@ function createCharacter(player) {
         4,
         8
       ),
-      bodyMaterial
+      new THREE.MeshStandardMaterial(
+        {
+          color:
+            player.id ===
+            myPlayerId
+              ? 0x8b4cff
+              : 0x555565
+        }
+      )
     );
 
   body.position.y =
     0.9;
 
-  group.add(body);
+  group.add(
+    body
+  );
 
   const head =
     new THREE.Mesh(
@@ -2134,94 +3173,19 @@ function createCharacter(player) {
         12,
         10
       ),
-      skinMaterial
+      new THREE.MeshStandardMaterial(
+        {
+          color: 0xf0b28b
+        }
+      )
     );
 
   head.position.y =
     1.85;
 
-  group.add(head);
-
-  const nameCanvas =
-    document.createElement("canvas");
-
-  nameCanvas.width =
-    512;
-
-  nameCanvas.height =
-    128;
-
-  const ctx =
-    nameCanvas.getContext("2d");
-
-  ctx.clearRect(
-    0,
-    0,
-    512,
-    128
+  group.add(
+    head
   );
-
-  ctx.fillStyle =
-    "rgba(5,5,10,0.82)";
-
-  roundRect(
-    ctx,
-    35,
-    28,
-    442,
-    70,
-    22
-  );
-
-  ctx.fill();
-
-  ctx.fillStyle =
-    "#ffffff";
-
-  ctx.font =
-    "bold 42px Arial";
-
-  ctx.textAlign =
-    "center";
-
-  ctx.textBaseline =
-    "middle";
-
-  ctx.fillText(
-    cleanName(player.name),
-    256,
-    63
-  );
-
-  const texture =
-    new THREE.CanvasTexture(
-      nameCanvas
-    );
-
-  texture.needsUpdate =
-    true;
-
-  const labelMaterial =
-    new THREE.SpriteMaterial({
-      map: texture,
-      transparent: true
-    });
-
-  const label =
-    new THREE.Sprite(
-      labelMaterial
-    );
-
-  label.scale.set(
-    2.5,
-    0.63,
-    1
-  );
-
-  label.position.y =
-    2.45;
-
-  group.add(label);
 
   group.position.set(
     player.x || 0,
@@ -2229,94 +3193,28 @@ function createCharacter(player) {
     player.z || 0
   );
 
-  scene.add(group);
+  scene.add(
+    group
+  );
 
   return group;
 }
 
-function roundRect(
-  ctx,
-  x,
-  y,
-  width,
-  height,
-  radius
-) {
-
-  ctx.beginPath();
-
-  ctx.moveTo(
-    x + radius,
-    y
-  );
-
-  ctx.lineTo(
-    x + width - radius,
-    y
-  );
-
-  ctx.quadraticCurveTo(
-    x + width,
-    y,
-    x + width,
-    y + radius
-  );
-
-  ctx.lineTo(
-    x + width,
-    y + height - radius
-  );
-
-  ctx.quadraticCurveTo(
-    x + width,
-    y + height,
-    x + width - radius,
-    y + height
-  );
-
-  ctx.lineTo(
-    x + radius,
-    y + height
-  );
-
-  ctx.quadraticCurveTo(
-    x,
-    y + height,
-    x,
-    y + height - radius
-  );
-
-  ctx.lineTo(
-    x,
-    y + radius
-  );
-
-  ctx.quadraticCurveTo(
-    x,
-    y,
-    x + radius,
-    y
-  );
-
-  ctx.closePath();
-}
-
-/* =========================================================
-   LOCAL PLAYER
-   ========================================================= */
-
 function createLocalCharacter() {
 
-  const player = {
-    id: myPlayerId,
-    name: username,
-    x: 0,
-    y: 0,
-    z: 2
-  };
+  const me =
+    getPlayer(
+      myPlayerId
+    );
+
+  if (!me) {
+    return;
+  }
 
   myCharacter =
-    createCharacter(player);
+    createCharacter(
+      me
+    );
 
   cameraTarget =
     new THREE.Vector3(
@@ -2324,67 +3222,88 @@ function createLocalCharacter() {
       1.2,
       2
     );
-
-  players.forEach(p => {
-
-    if (
-      p.id === myPlayerId
-    ) {
-      p.x = 0;
-      p.y = 0;
-      p.z = 2;
-    }
-  });
 }
 
 function rebuildWorldPlayers() {
 
-  if (!scene) return;
+  if (!scene) {
+    return;
+  }
 
-  for (const [id, object] of worldPlayers) {
+  for (
+    const [
+      id,
+      object
+    ] of worldPlayers
+  ) {
 
-    const exists =
-      players.some(
-        p => p.id === id
+    if (
+      !players.some(
+        p =>
+          p.id === id
+      )
+    ) {
+
+      scene.remove(
+        object
       );
 
-    if (!exists) {
-
-      scene.remove(object);
-
-      worldPlayers.delete(id);
+      worldPlayers.delete(
+        id
+      );
     }
   }
 
-  for (const player of players) {
+  if (
+    !myCharacter &&
+    players.length
+  ) {
+    createLocalCharacter();
+  }
 
-    if (player.id === myPlayerId) {
+  for (
+    const player of players
+  ) {
+
+    if (
+      player.id ===
+      myPlayerId
+    ) {
 
       if (myCharacter) {
 
         myCharacter.position.set(
-          player.x || 0,
-          player.y || 0,
-          player.z || 2
+          player.x,
+          player.y,
+          player.z
         );
       }
 
       continue;
     }
 
-    if (!worldPlayers.has(player.id)) {
+    if (
+      !worldPlayers.has(
+        player.id
+      )
+    ) {
 
       const character =
-        createCharacter(player);
+        createCharacter(
+          player
+        );
 
       worldPlayers.set(
         player.id,
         character
       );
+
     } else {
 
       const character =
-        worldPlayers.get(player.id);
+        worldPlayers.get(
+          player.id
+        );
 
       character.position.set(
         player.x,
@@ -2403,9 +3322,13 @@ function updateRemoteCharacter(
 ) {
 
   const character =
-    worldPlayers.get(id);
+    worldPlayers.get(
+      id
+    );
 
-  if (!character) return;
+  if (!character) {
+    return;
+  }
 
   character.position.lerp(
     new THREE.Vector3(
@@ -2417,28 +3340,39 @@ function updateRemoteCharacter(
   );
 }
 
-function removeWorldPlayer(id) {
+function removeWorldPlayer(
+  id
+) {
 
   const character =
-    worldPlayers.get(id);
+    worldPlayers.get(
+      id
+    );
 
-  if (!character) return;
+  if (!character) {
+    return;
+  }
 
-  scene.remove(character);
+  scene.remove(
+    character
+  );
 
-  worldPlayers.delete(id);
+  worldPlayers.delete(
+    id
+  );
 }
 
 /* =========================================================
    MOVEMENT
    ========================================================= */
 
-function updateMovement(delta) {
+function updateMovement(
+  delta
+) {
 
-  if (!myCharacter) return;
-
-  const speed =
-    4.2;
+  if (!myCharacter) {
+    return;
+  }
 
   let forward =
     joystickY;
@@ -2446,10 +3380,21 @@ function updateMovement(delta) {
   let side =
     joystickX;
 
-  if (keys.forward) forward += 1;
-  if (keys.backward) forward -= 1;
-  if (keys.right) side += 1;
-  if (keys.left) side -= 1;
+  if (keys.forward) {
+    forward += 1;
+  }
+
+  if (keys.backward) {
+    forward -= 1;
+  }
+
+  if (keys.right) {
+    side += 1;
+  }
+
+  if (keys.left) {
+    side -= 1;
+  }
 
   const length =
     Math.sqrt(
@@ -2459,30 +3404,43 @@ function updateMovement(delta) {
 
   if (length > 1) {
 
-    forward /= length;
-    side /= length;
+    forward /=
+      length;
+
+    side /=
+      length;
   }
 
   if (
-    Math.abs(forward) < 0.01 &&
-    Math.abs(side) < 0.01
+    Math.abs(forward) <
+      0.01 &&
+    Math.abs(side) <
+      0.01
   ) {
     return;
   }
 
   const moveX =
-    Math.cos(cameraYaw) * side +
-    Math.sin(cameraYaw) * forward;
+    Math.cos(cameraYaw) *
+      side +
+    Math.sin(cameraYaw) *
+      forward;
 
   const moveZ =
-    Math.cos(cameraYaw) * forward -
-    Math.sin(cameraYaw) * side;
+    Math.cos(cameraYaw) *
+      forward -
+    Math.sin(cameraYaw) *
+      side;
 
   myCharacter.position.x +=
-    moveX * speed * delta;
+    moveX *
+    4.2 *
+    delta;
 
   myCharacter.position.z +=
-    moveZ * speed * delta;
+    moveZ *
+    4.2 *
+    delta;
 
   myCharacter.position.x =
     THREE.MathUtils.clamp(
@@ -2507,71 +3465,54 @@ function updateMovement(delta) {
   sendPositionThrottled();
 }
 
-let lastPositionSend = 0;
-
-function sendPositionThrottled() {
-
-  const now =
-    performance.now();
-
-  if (
-    now - lastPositionSend <
-    70
-  ) {
-    return;
-  }
-
-  lastPositionSend =
-    now;
-
-  sendMyPosition();
-}
-
 /* =========================================================
    CAMERA
    ========================================================= */
 
 function updateCamera() {
 
-  if (!myCharacter) return;
-
-  const distance =
-    6.2;
-
-  const height =
-    3.1;
+  if (!myCharacter) {
+    return;
+  }
 
   const target =
     myCharacter.position.clone();
 
   target.y += 1.1;
 
+  if (!cameraTarget) {
+    cameraTarget =
+      target.clone();
+  }
+
   cameraTarget.lerp(
     target,
     0.12
   );
 
+  const distance =
+    6.2;
+
   const horizontal =
-    Math.cos(cameraPitch) *
+    Math.cos(
+      cameraPitch
+    ) *
     distance;
-
-  const cameraX =
-    myCharacter.position.x -
-    Math.sin(cameraYaw) *
-    horizontal;
-
-  const cameraZ =
-    myCharacter.position.z -
-    Math.cos(cameraYaw) *
-    horizontal;
 
   const desired =
     new THREE.Vector3(
-      cameraX,
+      myCharacter.position.x -
+        Math.sin(cameraYaw) *
+        horizontal,
+
       myCharacter.position.y +
-        height +
-        Math.sin(cameraPitch) * distance,
-      cameraZ
+        3.1 +
+        Math.sin(cameraPitch) *
+        distance,
+
+      myCharacter.position.z -
+        Math.cos(cameraYaw) *
+        horizontal
     );
 
   camera.position.lerp(
@@ -2590,6 +3531,7 @@ function updateCamera() {
 
 let looking = false;
 let lookPointerId = null;
+
 let lastLookX = 0;
 let lastLookY = 0;
 
@@ -2599,13 +3541,21 @@ function setupCameraControls() {
     "pointerdown",
     event => {
 
+      /*
+        O joystick tem prioridade.
+      */
+
       if (
-        joystick.contains(event.target)
+        event.target.closest &&
+        event.target.closest(
+          "#joystick"
+        )
       ) {
         return;
       }
 
       looking = true;
+
       lookPointerId =
         event.pointerId;
 
@@ -2624,7 +3574,7 @@ function setupCameraControls() {
       if (
         !looking ||
         event.pointerId !==
-        lookPointerId
+          lookPointerId
       ) {
         return;
       }
@@ -2658,25 +3608,27 @@ function setupCameraControls() {
     }
   );
 
-  const stopLook = event => {
+  const stop =
+    event => {
 
-    if (
-      event.pointerId ===
-      lookPointerId
-    ) {
-      looking = false;
-      lookPointerId = null;
-    }
-  };
+      if (
+        event.pointerId ===
+        lookPointerId
+      ) {
+
+        looking = false;
+        lookPointerId = null;
+      }
+    };
 
   renderer.domElement.addEventListener(
     "pointerup",
-    stopLook
+    stop
   );
 
   renderer.domElement.addEventListener(
     "pointercancel",
-    stopLook
+    stop
   );
 }
 
@@ -2686,19 +3638,27 @@ function setupCameraControls() {
 
 function setupJoystick() {
 
+  if (!joystick) {
+    return;
+  }
+
   joystick.addEventListener(
     "pointerdown",
     event => {
 
       event.preventDefault();
+      event.stopPropagation();
 
       joystickActive = true;
+
       joystickPointerId =
         event.pointerId;
 
-      joystick.setPointerCapture(
-        event.pointerId
-      );
+      try {
+        joystick.setPointerCapture(
+          event.pointerId
+        );
+      } catch {}
 
       updateJoystick(
         event.clientX,
@@ -2714,10 +3674,12 @@ function setupJoystick() {
       if (
         !joystickActive ||
         event.pointerId !==
-        joystickPointerId
+          joystickPointerId
       ) {
         return;
       }
+
+      event.preventDefault();
 
       updateJoystick(
         event.clientX,
@@ -2726,23 +3688,24 @@ function setupJoystick() {
     }
   );
 
-  const reset = event => {
+  const reset =
+    event => {
 
-    if (
-      event.pointerId !==
-      joystickPointerId
-    ) {
-      return;
-    }
+      if (
+        event.pointerId !==
+          joystickPointerId
+      ) {
+        return;
+      }
 
-    joystickActive = false;
+      joystickActive = false;
 
-    joystickX = 0;
-    joystickY = 0;
+      joystickX = 0;
+      joystickY = 0;
 
-    joystickKnob.style.transform =
-      "translate(0px, 0px)";
-  };
+      joystickKnob.style.transform =
+        "translate(0px, 0px)";
+    };
 
   joystick.addEventListener(
     "pointerup",
@@ -2780,7 +3743,8 @@ function updateJoystick(
     centerY;
 
   const max =
-    rect.width * 0.31;
+    rect.width *
+    0.31;
 
   const distance =
     Math.sqrt(
@@ -2788,13 +3752,18 @@ function updateJoystick(
       dy * dy
     );
 
-  if (distance > max) {
+  if (
+    distance >
+    max
+  ) {
 
     dx =
-      dx / distance * max;
+      dx / distance *
+      max;
 
     dy =
-      dy / distance * max;
+      dy / distance *
+      max;
   }
 
   joystickX =
@@ -2891,33 +3860,20 @@ function animate3D() {
 
   const delta =
     Math.min(
-      (now - lastFrameTime) / 1000,
+      (now -
+        lastFrameTime) /
+        1000,
       0.05
     );
 
   lastFrameTime =
     now;
 
-  updateMovement(delta);
+  updateMovement(
+    delta
+  );
 
   updateCamera();
-
-  for (const character of worldPlayers.values()) {
-
-    character.children.forEach(
-      child => {
-
-        if (
-          child.isSprite &&
-          camera
-        ) {
-          child.quaternion.copy(
-            camera.quaternion
-          );
-        }
-      }
-    );
-  }
 
   renderer.render(
     scene,
@@ -2931,7 +3887,12 @@ function animate3D() {
 
 function resize3D() {
 
-  if (!camera || !renderer) return;
+  if (
+    !camera ||
+    !renderer
+  ) {
+    return;
+  }
 
   camera.aspect =
     window.innerWidth /
@@ -2943,36 +3904,6 @@ function resize3D() {
     window.innerWidth,
     window.innerHeight
   );
-}
-
-/* =========================================================
-   UTILS
-   ========================================================= */
-
-function cleanName(value) {
-
-  return String(value || "Player")
-    .replace(
-      /[\u0000-\u001F\u007F]/g,
-      ""
-    )
-    .trim()
-    .slice(0, 16) ||
-    "Player";
-}
-
-function randomSpawnX() {
-
-  return (
-    Math.random() * 8
-  ) - 4;
-}
-
-function randomSpawnZ() {
-
-  return (
-    Math.random() * 5
-  ) - 1;
 }
 
 /* =========================================================
@@ -2990,18 +3921,40 @@ async function copyRoomCode() {
     copyCodeButton.textContent =
       "Copiado";
 
-    setTimeout(() => {
-
-      copyCodeButton.textContent =
-        "Copiar";
-
-    }, 1300);
+    setTimeout(
+      () => {
+        copyCodeButton.textContent =
+          "Copiar";
+      },
+      1300
+    );
 
   } catch {
 
     roomStatus.textContent =
-      "Código: " + roomCode;
+      "Código: " +
+      roomCode;
   }
+}
+
+/* =========================================================
+   LEAVE
+   ========================================================= */
+
+function leaveRoom() {
+
+  if (isHost) {
+
+    broadcast({
+      type: "ROOM_CLOSED"
+    });
+  }
+
+  disconnectEverything();
+
+  joinCodeInput.value = "";
+
+  showHome();
 }
 
 /* =========================================================
@@ -3012,21 +3965,26 @@ function disconnectEverything() {
 
   stopHeartbeat();
 
-  if (hostCleanupTimer) {
-    clearInterval(hostCleanupTimer);
-    hostCleanupTimer = null;
-  }
+  clearInterval(
+    hostCleanupTimer
+  );
 
-  for (const call of voiceCalls.values()) {
+  hostCleanupTimer =
+    null;
 
-    try {
-      call.close();
-    } catch {}
-  }
+  /*
+    Desliga completamente a voz.
+  */
 
-  voiceCalls.clear();
+  voiceEnabled = false;
+  voiceLocked = false;
 
-  for (const conn of connections.values()) {
+  closeAllVoice();
+
+  for (
+    const conn of
+    connections.values()
+  ) {
 
     try {
       conn.close();
@@ -3037,14 +3995,15 @@ function disconnectEverything() {
 
   if (localStream) {
 
-    for (const track of localStream.getTracks()) {
+    for (
+      const track of
+      localStream.getTracks()
+    ) {
       track.stop();
     }
 
     localStream = null;
   }
-
-  micEnabled = false;
 
   if (peer) {
 
@@ -3061,39 +4020,34 @@ function disconnectEverything() {
 
   isHost = false;
 
+  hostPeerId = "";
+
   gameRunning = false;
 
-  worldPlayers.forEach(
-    object => scene?.remove(object)
-  );
+  currentPhase =
+    "idle";
 
-  worldPlayers.clear();
-}
+  for (
+    const object of
+    worldPlayers.values()
+  ) {
 
-/* =========================================================
-   LEAVE ROOM
-   ========================================================= */
-
-function leaveRoom() {
-
-  if (isHost) {
-
-    broadcast({
-      type: "ROOM_CLOSED"
-    });
+    if (scene) {
+      scene.remove(
+        object
+      );
+    }
   }
 
-  disconnectEverything();
+  worldPlayers.clear();
 
-  joinCodeInput.value = "";
+  myCharacter = null;
 
-  roomStatus.textContent = "";
-
-  showHome();
+  updateVoiceButton();
 }
 
 /* =========================================================
-   EVENTS
+   BUTTONS
    ========================================================= */
 
 loginButton.addEventListener(
@@ -3105,7 +4059,10 @@ usernameInput.addEventListener(
   "keydown",
   event => {
 
-    if (event.key === "Enter") {
+    if (
+      event.key ===
+      "Enter"
+    ) {
       login();
     }
   }
@@ -3135,7 +4092,10 @@ joinCodeInput.addEventListener(
   "keydown",
   event => {
 
-    if (event.key === "Enter") {
+    if (
+      event.key ===
+      "Enter"
+    ) {
       joinRoom();
     }
   }
@@ -3163,7 +4123,19 @@ micButton.addEventListener(
 
 gameVoiceButton.addEventListener(
   "click",
-  toggleGameVoice
+  () => {
+
+    /*
+      Durante qualquer fase bloqueada,
+      não existe voice chat.
+    */
+
+    if (voiceLocked) {
+      return;
+    }
+
+    toggleMic();
+  }
 );
 
 startGameButton.addEventListener(
@@ -3179,22 +4151,4 @@ loadSavedUser();
 
 init3D();
 
-setupJoystick();
-
-setupKeyboard();
-
 showHome();
-
-if (localStorage.getItem("shadow_username")) {
-
-  const saved =
-    localStorage.getItem(
-      "shadow_username"
-    );
-
-  username =
-    cleanName(saved);
-
-  usernameInput.value =
-    username;
-}
