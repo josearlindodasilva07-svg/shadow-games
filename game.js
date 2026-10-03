@@ -1,14 +1,9 @@
 "use strict";
 
-/* =========================================================
-   SHADOW GAMES
-   ========================================================= */
-
-const $ = (id) => document.getElementById(id);
+const $ = id => document.getElementById(id);
 
 const loginScreen = $("login");
 const homeScreen = $("home");
-const joinRoomScreen = $("joinPanel");
 const roomScreen = $("room");
 const gameScreen = $("game");
 
@@ -17,12 +12,12 @@ const loginButton = $("loginButton");
 const loginStatus = $("loginStatus");
 
 const profileName = $("profileName");
-const profileAvatar = $("profileAvatar");
 
 const createButton = $("create");
 const joinButton = $("join");
 const logoutButton = $("logout");
 
+const joinPanel = $("joinPanel");
 const joinCodeInput = $("joinCodeInput");
 const joinConfirm = $("joinConfirm");
 const joinCancel = $("joinCancel");
@@ -30,14 +25,16 @@ const joinStatus = $("joinStatus");
 
 const roomCodeElement = $("roomCode");
 const copyCodeButton = $("copyCode");
-const statusElement = $("status");
 
+const statusElement = $("status");
 const playersElement = $("players");
+
 const startButton = $("start");
 const leaveRoomButton = $("leaveRoom");
 
 const micButton = $("micButton");
 const voiceStatus = $("voiceStatus");
+
 const remoteAudios = $("remoteAudios");
 
 const gameVoiceButton = $("gameVoiceButton");
@@ -66,23 +63,23 @@ const resultText = $("resultText");
 
 
 /* =========================================================
-   STATE
-   ========================================================= */
+   ESTADO
+========================================================= */
 
 let username = "";
-let peer = null;
 
+let peer = null;
 let isHost = false;
+
 let roomCode = "";
 let roomPeerId = "";
 
+let players = new Map();
+let roomConnections = new Map();
+
 let localStream = null;
 let micEnabled = false;
-
 let gameVoiceEnabled = false;
-
-let roomConnections = new Map();
-let players = new Map();
 
 let voiceCalls = new Map();
 let remoteAudioElements = new Map();
@@ -90,33 +87,29 @@ let remoteAudioElements = new Map();
 let heartbeatTimer = null;
 let pruneTimer = null;
 
-let currentRound = 1;
-const MAX_ROUNDS = 4;
-
 let gameStarted = false;
-let roundRunning = false;
+let currentRound = 1;
+
+const MAX_ROUNDS = 4;
 
 let countdownTimer = null;
 let recordTimer = null;
 let playbackTimerHandle = null;
 
-let recordedBlob = null;
-let recordedUrl = null;
-
 let mediaRecorder = null;
 let recordedChunks = [];
 
-let referenceAudio = null;
+let recordedBlob = null;
+let recordedUrl = null;
 
-let playbackIndex = 0;
+let referenceAudioContext = null;
 
-let roundScores = {};
-let totalScores = {};
+let activePlaybackAudio = null;
 
 
 /* =========================================================
-   BASIC HELPERS
-   ========================================================= */
+   UTILIDADES
+========================================================= */
 
 function showScreen(screen) {
   loginScreen.classList.add("hidden");
@@ -127,12 +120,8 @@ function showScreen(screen) {
   screen.classList.remove("hidden");
 }
 
-function setJoinStatus(text) {
-  joinStatus.textContent = text || "";
-}
-
-function setStatus(text) {
-  statusElement.textContent = text || "";
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function normalizeRoomCode(value) {
@@ -143,34 +132,46 @@ function normalizeRoomCode(value) {
 }
 
 function randomCode(length = 6) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const chars =
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
   let result = "";
 
   for (let i = 0; i < length; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
+    result += chars[
+      Math.floor(Math.random() * chars.length)
+    ];
   }
 
   return result;
 }
 
 function randomPlayerId() {
-  return "shadow-player-" + Math.random().toString(36).slice(2, 12);
+  return (
+    "shadow-player-" +
+    Math.random().toString(36).slice(2, 12)
+  );
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function setStatus(text) {
+  statusElement.textContent = text || "";
+}
+
+function setJoinStatus(text) {
+  joinStatus.textContent = text || "";
 }
 
 
 /* =========================================================
    LOGIN
-   ========================================================= */
+========================================================= */
 
 function login() {
   const name = usernameInput.value.trim();
 
   if (!name) {
-    loginStatus.textContent = "Digite um nome.";
+    loginStatus.textContent =
+      "Digite um nome.";
     return;
   }
 
@@ -181,143 +182,177 @@ function login() {
     username
   );
 
-  profileName.textContent = username;
-
-  profileAvatar.textContent = "";
+  profileName.textContent =
+    username;
 
   loginStatus.textContent = "";
 
   showScreen(homeScreen);
 }
 
-function loadSavedUser() {
-  const saved = localStorage.getItem(
-    "shadow_games_username"
-  );
+loginButton.addEventListener(
+  "click",
+  login
+);
 
-  if (!saved) {
-    showScreen(loginScreen);
-    return;
+usernameInput.addEventListener(
+  "keydown",
+  event => {
+    if (event.key === "Enter") {
+      login();
+    }
   }
+);
 
-  username = saved;
-  usernameInput.value = username;
-  profileName.textContent = username;
+function loadUser() {
+  const saved =
+    localStorage.getItem(
+      "shadow_games_username"
+    );
 
-  showScreen(homeScreen);
+  if (saved) {
+    username = saved;
+    usernameInput.value = saved;
+    profileName.textContent = saved;
+    showScreen(homeScreen);
+  } else {
+    showScreen(loginScreen);
+  }
 }
 
-loginButton.addEventListener("click", login);
 
-usernameInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    login();
+/* =========================================================
+   ENTRAR EM SALA
+========================================================= */
+
+joinButton.addEventListener(
+  "click",
+  () => {
+
+    joinPanel.classList.remove(
+      "hidden"
+    );
+
+    joinCodeInput.value = "";
+    setJoinStatus("");
+
+    setTimeout(() => {
+      joinCodeInput.focus();
+    }, 50);
   }
-});
+);
 
-logoutButton.addEventListener("click", () => {
-  leaveEverything();
+joinCancel.addEventListener(
+  "click",
+  () => {
 
-  localStorage.removeItem(
-    "shadow_games_username"
-  );
+    joinPanel.classList.add(
+      "hidden"
+    );
 
-  username = "";
-  usernameInput.value = "";
+    joinCodeInput.value = "";
+    setJoinStatus("");
+  }
+);
 
-  showScreen(loginScreen);
-});
+joinCodeInput.addEventListener(
+  "input",
+  () => {
+    joinCodeInput.value =
+      normalizeRoomCode(
+        joinCodeInput.value
+      );
+  }
+);
+
+joinCodeInput.addEventListener(
+  "keydown",
+  event => {
+    if (event.key === "Enter") {
+      joinConfirm.click();
+    }
+  }
+);
+
+joinConfirm.addEventListener(
+  "click",
+  () => {
+
+    const code =
+      normalizeRoomCode(
+        joinCodeInput.value
+      );
+
+    if (code.length < 4) {
+      setJoinStatus(
+        "Digite um código válido."
+      );
+      return;
+    }
+
+    setJoinStatus(
+      "Conectando..."
+    );
+
+    joinRoom(code);
+  }
+);
 
 
 /* =========================================================
-   JOIN UI
-   ========================================================= */
+   CRIAR SALA
+========================================================= */
 
-joinButton.addEventListener("click", () => {
-  joinRoomScreen.classList.remove("hidden");
-
-  joinCodeInput.value = "";
-  setJoinStatus("");
-
-  setTimeout(() => {
-    joinCodeInput.focus();
-  }, 50);
-});
-
-joinCancel.addEventListener("click", () => {
-  joinRoomScreen.classList.add("hidden");
-  joinCodeInput.value = "";
-  setJoinStatus("");
-});
-
-joinCodeInput.addEventListener("input", () => {
-  joinCodeInput.value = normalizeRoomCode(
-    joinCodeInput.value
-  );
-});
-
-joinCodeInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    joinConfirm.click();
-  }
-});
-
-joinConfirm.addEventListener("click", () => {
-  const code = normalizeRoomCode(
-    joinCodeInput.value
-  );
-
-  if (code.length < 4) {
-    setJoinStatus("Digite um código válido.");
-    return;
-  }
-
-  setJoinStatus("Conectando à sala...");
-
-  joinRoom(code);
-});
-
-
-/* =========================================================
-   CREATE ROOM
-   ========================================================= */
-
-createButton.addEventListener("click", () => {
-  createRoom();
-});
+createButton.addEventListener(
+  "click",
+  createRoom
+);
 
 function createRoom() {
-  if (peer) {
-    try {
-      peer.destroy();
-    } catch (_) {}
-  }
+
+  cleanupPeer();
 
   isHost = true;
-  roomCode = randomCode(6);
 
-  roomPeerId = "shadow-room-" + roomCode;
+  roomCode =
+    randomCode(6);
 
-  setStatus("Criando sala...");
+  roomPeerId =
+    "shadow-room-" +
+    roomCode;
 
-  peer = new Peer(roomPeerId, {
-    debug: 0
-  });
+  peer = new Peer(
+    roomPeerId,
+    {
+      debug: 0
+    }
+  );
+
+  setStatus(
+    "Criando sala..."
+  );
 
   peer.on("open", () => {
+
     players.clear();
 
-    players.set(peer.id, {
-      id: peer.id,
-      name: username,
-      host: true,
-      connected: true,
-      score: 0
-    });
+    players.set(
+      peer.id,
+      {
+        id: peer.id,
+        name: username,
+        host: true,
+        connected: true,
+        lastSeen: Date.now()
+      }
+    );
 
-    roomCodeElement.textContent = roomCode;
+    roomCodeElement.textContent =
+      roomCode;
 
-    startButton.classList.remove("hidden");
+    startButton.classList.remove(
+      "hidden"
+    );
 
     setStatus(
       "Sala criada. Envie o código para seus amigos."
@@ -331,167 +366,237 @@ function createRoom() {
     renderPlayers();
   });
 
-  peer.on("connection", (connection) => {
-    handleDataConnection(connection);
-  });
-
-  peer.on("call", (call) => {
-    handleIncomingVoiceCall(call);
-  });
-
-  peer.on("error", (error) => {
-    console.error("Peer error:", error);
-
-    if (error.type === "unavailable-id") {
-      setStatus(
-        "Esse código já está sendo usado. Crie outra sala."
+  peer.on(
+    "connection",
+    connection => {
+      setupDataConnection(
+        connection
       );
-
-      try {
-        peer.destroy();
-      } catch (_) {}
     }
-  });
+  );
+
+  peer.on(
+    "call",
+    call => {
+      answerVoiceCall(call);
+    }
+  );
+
+  peer.on(
+    "error",
+    error => {
+      console.error(
+        "Peer:",
+        error
+      );
+    }
+  );
 }
 
 
 /* =========================================================
-   JOIN ROOM
-   ========================================================= */
+   ENTRAR
+========================================================= */
 
 function joinRoom(code) {
-  roomCode = code;
-  roomPeerId = "shadow-room-" + code;
+
+  cleanupPeer();
 
   isHost = false;
 
-  if (peer) {
-    try {
-      peer.destroy();
-    } catch (_) {}
-  }
+  roomCode = code;
 
-  peer = new Peer(randomPlayerId(), {
-    debug: 0
-  });
+  roomPeerId =
+    "shadow-room-" +
+    code;
+
+  peer = new Peer(
+    randomPlayerId(),
+    {
+      debug: 0
+    }
+  );
 
   peer.on("open", () => {
-    const connection = peer.connect(
-      roomPeerId,
-      {
-        reliable: true
+
+    const connection =
+      peer.connect(
+        roomPeerId,
+        {
+          reliable: true
+        }
+      );
+
+    setupDataConnection(
+      connection
+    );
+
+    connection.on(
+      "open",
+      () => {
+
+        connection.send({
+          type: "JOIN",
+          id: peer.id,
+          name: username
+        });
+
+        roomCodeElement.textContent =
+          roomCode;
+
+        startButton.classList.add(
+          "hidden"
+        );
+
+        setStatus(
+          "Conectado à sala."
+        );
+
+        showScreen(roomScreen);
+
+        joinPanel.classList.add(
+          "hidden"
+        );
+
+        startHeartbeat();
+
+        renderPlayers();
       }
     );
 
-    handleDataConnection(connection);
+    connection.on(
+      "error",
+      () => {
 
-    connection.on("open", () => {
-      connection.send({
-        type: "JOIN",
-        id: peer.id,
-        name: username
-      });
-
-      showScreen(roomScreen);
-
-      roomCodeElement.textContent = roomCode;
-
-      startButton.classList.add("hidden");
-
-      setStatus("Conectado à sala.");
-
-      startHeartbeat();
-
-      renderPlayers();
-
-      setJoinStatus("");
-    });
-
-    connection.on("error", () => {
-      setJoinStatus(
-        "Não foi possível entrar nessa sala."
-      );
-    });
+        setJoinStatus(
+          "Não foi possível conectar à sala."
+        );
+      }
+    );
   });
 
-  peer.on("call", (call) => {
-    handleIncomingVoiceCall(call);
-  });
-
-  peer.on("error", (error) => {
-    console.error("Peer error:", error);
-
-    if (
-      error.type === "peer-unavailable" ||
-      error.type === "network"
-    ) {
-      setJoinStatus(
-        "Sala não encontrada ou conexão indisponível."
-      );
+  peer.on(
+    "call",
+    call => {
+      answerVoiceCall(call);
     }
-  });
+  );
+
+  peer.on(
+    "error",
+    error => {
+
+      if (
+        error.type ===
+        "peer-unavailable"
+      ) {
+        setJoinStatus(
+          "Sala não encontrada."
+        );
+      }
+    }
+  );
 }
 
 
 /* =========================================================
    DATA CONNECTION
-   ========================================================= */
+========================================================= */
 
-function handleDataConnection(connection) {
+function setupDataConnection(
+  connection
+) {
+
+  if (!connection) {
+    return;
+  }
+
   roomConnections.set(
     connection.peer,
     connection
   );
 
-  connection.on("data", (message) => {
-    handleMessage(
-      message,
-      connection
-    );
-  });
-
-  connection.on("open", () => {
-    roomConnections.set(
-      connection.peer,
-      connection
-    );
-  });
-
-  connection.on("close", () => {
-    roomConnections.delete(
-      connection.peer
-    );
-
-    if (isHost) {
-      removePlayer(connection.peer);
+  connection.on(
+    "data",
+    message => {
+      handleMessage(
+        message,
+        connection
+      );
     }
-  });
+  );
 
-  connection.on("error", () => {
-    roomConnections.delete(
-      connection.peer
-    );
+  connection.on(
+    "open",
+    () => {
 
-    if (isHost) {
-      removePlayer(connection.peer);
+      roomConnections.set(
+        connection.peer,
+        connection
+      );
     }
-  });
+  );
+
+  connection.on(
+    "close",
+    () => {
+
+      roomConnections.delete(
+        connection.peer
+      );
+
+      if (isHost) {
+        removePlayer(
+          connection.peer
+        );
+
+        sendRoomState();
+      }
+    }
+  );
+
+  connection.on(
+    "error",
+    () => {
+
+      roomConnections.delete(
+        connection.peer
+      );
+
+      if (isHost) {
+        removePlayer(
+          connection.peer
+        );
+
+        sendRoomState();
+      }
+    }
+  );
 }
 
 
 /* =========================================================
-   MESSAGES
-   ========================================================= */
+   MENSAGENS
+========================================================= */
 
-function handleMessage(message, connection) {
-  if (!message || !message.type) {
+function handleMessage(
+  message,
+  connection
+) {
+
+  if (
+    !message ||
+    !message.type
+  ) {
     return;
   }
 
   switch (message.type) {
 
     case "JOIN":
+
       if (isHost) {
+
         addPlayer(
           message.id,
           message.name
@@ -499,86 +604,123 @@ function handleMessage(message, connection) {
 
         sendRoomState();
       }
+
       break;
+
 
     case "ROOM_STATE":
+
       if (!isHost) {
-        applyRoomState(message.players);
+        applyRoomState(
+          message.players
+        );
       }
+
       break;
+
 
     case "HEARTBEAT":
+
       if (isHost) {
-        const player = players.get(message.id);
+
+        const player =
+          players.get(
+            message.id
+          );
 
         if (player) {
-          player.connected = true;
-          player.lastSeen = Date.now();
+          player.lastSeen =
+            Date.now();
+
+          player.connected =
+            true;
         }
       }
+
       break;
+
 
     case "LEAVE":
+
       if (isHost) {
-        removePlayer(message.id);
+
+        removePlayer(
+          message.id
+        );
+
         sendRoomState();
       }
+
       break;
 
+
     case "START_GAME":
+
       if (!isHost) {
-        startGameForEveryone(
+        startGame(
           message.round || 1
         );
       }
+
       break;
 
-    case "GAME_COUNTDOWN":
+
+    case "ROUND_COUNTDOWN":
+
       if (!isHost) {
-        startGuestCountdown(
+        startCountdown(
           message.round
         );
       }
+
       break;
+
 
     case "REFERENCE":
+
       if (!isHost) {
-        startGuestReference();
+        startReference();
       }
+
       break;
+
 
     case "RECORD_START":
+
       if (!isHost) {
-        startGuestRecording();
+        startRecording();
       }
+
       break;
+
 
     case "PLAYBACK_START":
+
       if (!isHost) {
-        startGuestPlayback(message);
+        startPlayback();
       }
+
       break;
 
+
     case "ROUND_RESULT":
+
       if (!isHost) {
-        showGuestResult(
-          message.scores,
+        showResult(
+          message.score,
           message.round
         );
       }
+
       break;
 
+
     case "GAME_FINISH":
+
       if (!isHost) {
         finishGame();
       }
-      break;
 
-    case "VOICE_STATE":
-      updatePlayerVoiceState(
-        message.id,
-        message.enabled
-      );
       break;
   }
 }
@@ -586,26 +728,38 @@ function handleMessage(message, connection) {
 
 /* =========================================================
    PLAYERS
-   ========================================================= */
+========================================================= */
 
-function addPlayer(id, name) {
-  if (!id || id === peer.id) {
+function addPlayer(
+  id,
+  name
+) {
+
+  if (
+    !id ||
+    id === peer.id
+  ) {
     return;
   }
 
-  players.set(id, {
+  players.set(
     id,
-    name: name || "Jogador",
-    host: false,
-    connected: true,
-    score: 0,
-    lastSeen: Date.now()
-  });
+    {
+      id,
+      name:
+        name ||
+        "Jogador",
+      host: false,
+      connected: true,
+      lastSeen: Date.now()
+    }
+  );
 
   renderPlayers();
 }
 
 function removePlayer(id) {
+
   players.delete(id);
 
   const connection =
@@ -619,102 +773,143 @@ function removePlayer(id) {
 
   roomConnections.delete(id);
 
-  closeVoiceCall(id);
-  removeRemoteAudio(id);
+  closeVoice(id);
 
   renderPlayers();
 }
 
-function applyRoomState(playerList) {
+function applyRoomState(
+  list
+) {
+
   players.clear();
 
-  if (Array.isArray(playerList)) {
-    playerList.forEach(player => {
-      players.set(
-        player.id,
-        player
-      );
-    });
+  if (Array.isArray(list)) {
+
+    list.forEach(
+      player => {
+
+        players.set(
+          player.id,
+          player
+        );
+      }
+    );
   }
 
   renderPlayers();
 }
 
 function renderPlayers() {
+
   playersElement.innerHTML = "";
 
-  const list = Array.from(
-    players.values()
+  players.forEach(
+    player => {
+
+      const row =
+        document.createElement(
+          "div"
+        );
+
+      row.className =
+        "player";
+
+      const left =
+        document.createElement(
+          "div"
+        );
+
+      left.className =
+        "player-left";
+
+      const dot =
+        document.createElement(
+          "div"
+        );
+
+      dot.className =
+        "player-dot " +
+        (
+          player.connected !== false
+            ? "online"
+            : ""
+        );
+
+      const info =
+        document.createElement(
+          "div"
+        );
+
+      const name =
+        document.createElement(
+          "div"
+        );
+
+      name.className =
+        "player-name";
+
+      name.textContent =
+        player.name +
+        (
+          player.id === peer?.id
+            ? " (você)"
+            : ""
+        );
+
+      const tag =
+        document.createElement(
+          "div"
+        );
+
+      tag.className =
+        "player-tag";
+
+      tag.textContent =
+        player.host
+          ? "Host"
+          : "Jogador";
+
+      info.appendChild(name);
+      info.appendChild(tag);
+
+      left.appendChild(dot);
+      left.appendChild(info);
+
+      row.appendChild(left);
+
+      playersElement.appendChild(row);
+    }
   );
 
-  list.forEach(player => {
-    const row = document.createElement("div");
-    row.className = "player";
-
-    const left = document.createElement("div");
-    left.className = "player-left";
-
-    const dot = document.createElement("div");
-    dot.className =
-      "player-dot " +
-      (player.connected !== false
-        ? "online"
-        : "");
-
-    const info = document.createElement("div");
-
-    const name = document.createElement("div");
-    name.className = "player-name";
-    name.textContent =
-      player.name +
-      (player.id === peer?.id
-        ? " (você)"
-        : "");
-
-    const tag = document.createElement("div");
-    tag.className = "player-tag";
-
-    tag.textContent = player.host
-      ? "Host"
-      : "Jogador";
-
-    info.appendChild(name);
-    info.appendChild(tag);
-
-    left.appendChild(dot);
-    left.appendChild(info);
-
-    row.appendChild(left);
-
-    playersElement.appendChild(row);
-  });
-
-  updateGamePlayerCount();
-}
-
-function updateGamePlayerCount() {
   gamePlayers.textContent =
-    `${players.size}/${Math.max(5, players.size)}`;
+    `${players.size}/5`;
 }
 
 
 /* =========================================================
    ROOM STATE
-   ========================================================= */
+========================================================= */
 
-function getRoomPlayerArray() {
+function roomPlayerList() {
+
   return Array.from(
     players.values()
-  ).map(player => ({
-    id: player.id,
-    name: player.name,
-    host: player.host,
-    connected: player.connected,
-    score: player.score || 0
-  }));
+  ).map(
+    player => ({
+      id: player.id,
+      name: player.name,
+      host: player.host,
+      connected: player.connected
+    })
+  );
 }
 
-function sendToPlayer(id, message) {
+function sendTo(
+  id,
+  message
+) {
+
   const connection =
     roomConnections.get(id);
 
@@ -722,24 +917,36 @@ function sendToPlayer(id, message) {
     connection &&
     connection.open
   ) {
+
     try {
-      connection.send(message);
+      connection.send(
+        message
+      );
+
       return true;
+
     } catch (_) {}
   }
 
   return false;
 }
 
-function broadcast(message) {
+function broadcast(
+  message
+) {
+
   roomConnections.forEach(
-    (connection) => {
+    connection => {
+
       if (
         connection &&
         connection.open
       ) {
+
         try {
-          connection.send(message);
+          connection.send(
+            message
+          );
         } catch (_) {}
       }
     }
@@ -747,9 +954,13 @@ function broadcast(message) {
 }
 
 function sendRoomState() {
+
   broadcast({
-    type: "ROOM_STATE",
-    players: getRoomPlayerArray()
+    type:
+      "ROOM_STATE",
+
+    players:
+      roomPlayerList()
   });
 
   renderPlayers();
@@ -757,219 +968,152 @@ function sendRoomState() {
 
 
 /* =========================================================
-   HEARTBEAT / LEAVE
-   ========================================================= */
+   HEARTBEAT
+========================================================= */
 
 function startHeartbeat() {
+
   stopHeartbeat();
 
-  heartbeatTimer = setInterval(() => {
+  heartbeatTimer =
+    setInterval(
+      () => {
 
-    if (!peer || peer.destroyed) {
-      return;
-    }
+        if (
+          !peer ||
+          peer.destroyed
+        ) {
+          return;
+        }
 
-    if (isHost) {
-      const me = players.get(peer.id);
+        if (!isHost) {
 
-      if (me) {
-        me.lastSeen = Date.now();
-        me.connected = true;
-      }
+          sendTo(
+            roomPeerId,
+            {
+              type:
+                "HEARTBEAT",
 
-      return;
-    }
+              id:
+                peer.id
+            }
+          );
+        }
 
-    sendToPlayer(
-      roomPeerId,
-      {
-        type: "HEARTBEAT",
-        id: peer.id
-      }
+      },
+      1800
     );
-
-  }, 2500);
 }
 
 function stopHeartbeat() {
+
   if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
+
+    clearInterval(
+      heartbeatTimer
+    );
+
     heartbeatTimer = null;
   }
 }
 
 function startPrune() {
+
   if (!isHost) {
     return;
   }
 
   if (pruneTimer) {
-    clearInterval(pruneTimer);
+    clearInterval(
+      pruneTimer
+    );
   }
 
-  pruneTimer = setInterval(() => {
-    const now = Date.now();
+  pruneTimer =
+    setInterval(
+      () => {
 
-    players.forEach((player, id) => {
+        const now =
+          Date.now();
 
-      if (id === peer.id) {
-        return;
-      }
+        players.forEach(
+          (player, id) => {
 
-      if (
-        !player.lastSeen ||
-        now - player.lastSeen > 6000
-      ) {
-        removePlayer(id);
-        sendRoomState();
-      }
-    });
+            if (
+              id === peer.id
+            ) {
+              return;
+            }
 
-  }, 2000);
+            if (
+              player.lastSeen &&
+              now -
+                player.lastSeen >
+                4500
+            ) {
+
+              removePlayer(id);
+
+              sendRoomState();
+            }
+          }
+        );
+
+      },
+      1500
+    );
 }
 
-function sendLeave() {
-  if (
-    !peer ||
-    peer.destroyed ||
-    isHost
-  ) {
+
+/* =========================================================
+   MICROFONE
+========================================================= */
+
+async function getMicrophone() {
+
+  if (localStream) {
+    return localStream;
+  }
+
+  localStream =
+    await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1,
+        sampleRate: 48000,
+        sampleSize: 16,
+        latency: 0
+      },
+      video: false
+    });
+
+  return localStream;
+}
+
+function setTracksEnabled(
+  enabled
+) {
+
+  if (!localStream) {
     return;
   }
 
-  try {
-    const connection =
-      roomConnections.get(roomPeerId);
-
-    if (
-      connection &&
-      connection.open
-    ) {
-      connection.send({
-        type: "LEAVE",
-        id: peer.id
-      });
-    }
-  } catch (_) {}
-}
-
-window.addEventListener(
-  "beforeunload",
-  () => {
-    sendLeave();
-  }
-);
-
-
-/* =========================================================
-   COPY CODE
-   ========================================================= */
-
-copyCodeButton.addEventListener(
-  "click",
-  async () => {
-
-    if (!roomCode) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(
-        roomCode
-      );
-
-      copyCodeButton.textContent =
-        "Código copiado";
-
-      setTimeout(() => {
-        copyCodeButton.textContent =
-          "Copiar código";
-      }, 1400);
-
-    } catch (_) {
-      setStatus(
-        "Código: " + roomCode
-      );
-    }
-  }
-);
-
-
-/* =========================================================
-   MICROPHONE
-   ========================================================= */
-
-async function requestMicrophone() {
-  if (localStream) {
-    return localStream;
-  }
-
-  try {
-    localStream =
-      await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: false,
-          autoGainControl: false,
-          latency: 0,
-          channelCount: 1,
-          sampleRate: 48000,
-          sampleSize: 16
-        },
-        video: false
-      });
-
-    return localStream;
-
-  } catch (error) {
-    console.error(
-      "Microphone error:",
-      error
-    );
-
-    throw error;
-  }
-}
-
-function setLocalMicEnabled(enabled) {
-  micEnabled = enabled;
-
-  if (localStream) {
-    localStream
-      .getAudioTracks()
-      .forEach(track => {
-        track.enabled = enabled;
-      });
-  }
-
-  updateMicUI();
-
-  if (isHost) {
-    const me = players.get(peer.id);
-
-    if (me) {
-      me.voice = enabled;
-    }
-
-    broadcast({
-      type: "VOICE_STATE",
-      id: peer.id,
-      enabled
-    });
-  } else {
-    sendToPlayer(
-      roomPeerId,
-      {
-        type: "VOICE_STATE",
-        id: peer.id,
-        enabled
+  localStream
+    .getAudioTracks()
+    .forEach(
+      track => {
+        track.enabled =
+          enabled;
       }
     );
-  }
 }
 
 function updateMicUI() {
+
   if (micEnabled) {
+
     micButton.textContent =
       "Desligar microfone";
 
@@ -979,7 +1123,9 @@ function updateMicUI() {
 
     voiceStatus.textContent =
       "Microfone ligado";
+
   } else {
+
     micButton.textContent =
       "Ativar microfone";
 
@@ -996,41 +1142,57 @@ micButton.addEventListener(
   "click",
   async () => {
 
-    if (!micEnabled) {
+    if (micEnabled) {
 
-      try {
-        await requestMicrophone();
+      micEnabled = false;
 
-        setLocalMicEnabled(true);
+      /*
+       * Só desativa a transmissão.
+       * As chamadas recebidas continuam.
+       */
+      setTracksEnabled(false);
 
-        /*
-         * Cria as chamadas imediatamente.
-         * Não espera o DataConnection.
-         */
-        callAllVoicePeers();
+      updateMicUI();
 
-      } catch (_) {
+      return;
+    }
 
-        voiceStatus.textContent =
-          "Não foi possível acessar o microfone.";
-      }
+    try {
 
-    } else {
-      setLocalMicEnabled(false);
+      await getMicrophone();
+
+      micEnabled = true;
+
+      setTracksEnabled(true);
+
+      updateMicUI();
+
+      /*
+       * Chamada imediatamente.
+       * Não espera DataConnection.
+       */
+      connectVoiceToEveryone();
+
+    } catch (_) {
+
+      voiceStatus.textContent =
+        "Não foi possível acessar o microfone.";
     }
   }
 );
 
 
 /* =========================================================
-   VOICE
-   ========================================================= */
+   VOZ
+========================================================= */
 
-function getVoicePeerIds() {
+function voicePeerIds() {
+
   const ids = [];
 
   players.forEach(
     (player, id) => {
+
       if (
         id !== peer?.id &&
         player.connected !== false
@@ -1040,10 +1202,6 @@ function getVoicePeerIds() {
     }
   );
 
-  /*
-   * Para convidados, o host pode ainda não
-   * ter entrado na lista visual.
-   */
   if (
     !isHost &&
     roomPeerId &&
@@ -1055,7 +1213,8 @@ function getVoicePeerIds() {
   return ids;
 }
 
-function callAllVoicePeers() {
+function connectVoiceToEveryone() {
+
   if (
     !peer ||
     peer.destroyed ||
@@ -1065,12 +1224,15 @@ function callAllVoicePeers() {
     return;
   }
 
-  getVoicePeerIds().forEach(
-    id => startOutgoingVoiceCall(id)
+  voicePeerIds().forEach(
+    id => {
+      createVoiceCall(id);
+    }
   );
 }
 
-function startOutgoingVoiceCall(id) {
+function createVoiceCall(id) {
+
   if (
     !id ||
     id === peer?.id ||
@@ -1080,134 +1242,177 @@ function startOutgoingVoiceCall(id) {
     return;
   }
 
-  const oldCall = voiceCalls.get(id);
+  const old =
+    voiceCalls.get(id);
 
-  if (oldCall) {
+  if (old) {
     try {
-      oldCall.close();
+      old.close();
     } catch (_) {}
-
-    voiceCalls.delete(id);
   }
+
+  let call;
 
   try {
 
-    const call = peer.call(
-      id,
-      localStream,
-      {
-        metadata: {
-          room: roomCode,
-          user: username
-        }
-      }
-    );
-
-    if (!call) {
-      return;
-    }
-
-    voiceCalls.set(id, call);
-
-    call.on("stream", stream => {
-      attachRemoteAudio(
+    call =
+      peer.call(
         id,
-        stream
+        localStream,
+        {
+          metadata: {
+            room: roomCode,
+            user: username
+          }
+        }
       );
-    });
 
-    call.on("close", () => {
-      if (
-        voiceCalls.get(id) === call
-      ) {
-        voiceCalls.delete(id);
-      }
-    });
-
-    call.on("error", () => {
-      if (
-        voiceCalls.get(id) === call
-      ) {
-        voiceCalls.delete(id);
-      }
-    });
-
-  } catch (error) {
-    console.error(
-      "Voice call error:",
-      error
-    );
+  } catch (_) {
+    return;
   }
-}
-
-function handleIncomingVoiceCall(call) {
 
   if (!call) {
     return;
   }
 
-  const callerId = call.peer;
+  voiceCalls.set(
+    id,
+    call
+  );
+
+  call.on(
+    "stream",
+    stream => {
+
+      attachRemoteAudio(
+        id,
+        stream
+      );
+    }
+  );
+
+  call.on(
+    "close",
+    () => {
+
+      if (
+        voiceCalls.get(id) ===
+        call
+      ) {
+        voiceCalls.delete(id);
+      }
+    }
+  );
+
+  call.on(
+    "error",
+    () => {
+
+      if (
+        voiceCalls.get(id) ===
+        call
+      ) {
+        voiceCalls.delete(id);
+      }
+    }
+  );
+}
+
+function answerVoiceCall(
+  call
+) {
+
+  if (!call) {
+    return;
+  }
+
+  const callerId =
+    call.peer;
 
   try {
 
     /*
-     * Mesmo com o microfone desligado,
-     * responde à chamada.
+     * Sempre responde.
      *
-     * Assim a pessoa continua ouvindo os outros.
+     * Se o microfone estiver desligado,
+     * a pessoa continua recebendo áudio.
      */
-    if (micEnabled && localStream) {
-      call.answer(localStream);
+    if (
+      micEnabled &&
+      localStream
+    ) {
+
+      call.answer(
+        localStream
+      );
+
     } else {
+
       call.answer();
     }
 
-    call.on("stream", stream => {
+  } catch (_) {
+    return;
+  }
+
+  call.on(
+    "stream",
+    stream => {
+
       attachRemoteAudio(
         callerId,
         stream
       );
-    });
+    }
+  );
 
-    call.on("close", () => {
+  call.on(
+    "close",
+    () => {
+
       removeRemoteAudio(
         callerId
       );
-    });
+    }
+  );
 
-    call.on("error", () => {
+  call.on(
+    "error",
+    () => {
+
       removeRemoteAudio(
         callerId
       );
-    });
-
-  } catch (error) {
-    console.error(
-      "Incoming voice error:",
-      error
-    );
-  }
+    }
+  );
 }
 
 function attachRemoteAudio(
   id,
   stream
 ) {
+
   let audio =
     remoteAudioElements.get(id);
 
   if (!audio) {
+
     audio =
-      document.createElement("audio");
+      document.createElement(
+        "audio"
+      );
 
     audio.autoplay = true;
     audio.playsInline = true;
-    audio.controls = false;
+    audio.preload = "none";
     audio.volume = 1;
 
-    audio.style.display = "none";
+    audio.style.display =
+      "none";
 
-    remoteAudios.appendChild(audio);
+    remoteAudios.appendChild(
+      audio
+    );
 
     remoteAudioElements.set(
       id,
@@ -1216,24 +1421,33 @@ function attachRemoteAudio(
   }
 
   /*
-   * Não usamos AudioContext.
-   * O áudio vai direto para o elemento
-   * para evitar processamento e atraso extra.
+   * Não usa AudioContext.
+   * Não cria ganho, compressor ou filtros.
+   * Vai direto do WebRTC para o áudio.
    */
-  audio.srcObject = stream;
+  if (
+    audio.srcObject !==
+    stream
+  ) {
 
-  const playPromise =
+    audio.srcObject =
+      stream;
+  }
+
+  const play =
     audio.play();
 
-  if (
-    playPromise &&
-    typeof playPromise.catch === "function"
-  ) {
-    playPromise.catch(() => {});
+  if (play) {
+    play.catch(
+      () => {}
+    );
   }
 }
 
-function removeRemoteAudio(id) {
+function removeRemoteAudio(
+  id
+) {
+
   const audio =
     remoteAudioElements.get(id);
 
@@ -1247,14 +1461,18 @@ function removeRemoteAudio(id) {
     audio.remove();
   } catch (_) {}
 
-  remoteAudioElements.delete(id);
+  remoteAudioElements.delete(
+    id
+  );
 }
 
-function closeVoiceCall(id) {
+function closeVoice(id) {
+
   const call =
     voiceCalls.get(id);
 
   if (call) {
+
     try {
       call.close();
     } catch (_) {}
@@ -1265,24 +1483,12 @@ function closeVoiceCall(id) {
   removeRemoteAudio(id);
 }
 
-function updatePlayerVoiceState(
-  id,
-  enabled
-) {
-  const player =
-    players.get(id);
-
-  if (player) {
-    player.voice = enabled;
-  }
-}
-
 
 /* =========================================================
-   GAME VOICE
-   ========================================================= */
+   VOZ DA PARTIDA
+========================================================= */
 
-function updateGameVoiceButton() {
+function updateGameVoiceUI() {
 
   if (gameVoiceEnabled) {
 
@@ -1316,62 +1522,55 @@ gameVoiceButton.addEventListener(
   "click",
   async () => {
 
-    /*
-     * Isso controla somente a transmissão
-     * da própria voz.
-     *
-     * OFF ainda escuta os outros.
-     */
-
     if (gameVoiceEnabled) {
 
-      gameVoiceEnabled = false;
+      gameVoiceEnabled =
+        false;
 
-      if (localStream) {
-        localStream
-          .getAudioTracks()
-          .forEach(track => {
-            track.enabled = false;
-          });
-      }
+      /*
+       * Só para de transmitir.
+       * Não fecha chamadas.
+       */
+      setTracksEnabled(false);
 
-      updateGameVoiceButton();
+      updateGameVoiceUI();
 
       return;
     }
 
     try {
 
-      await requestMicrophone();
+      await getMicrophone();
 
-      gameVoiceEnabled = true;
-
-      localStream
-        .getAudioTracks()
-        .forEach(track => {
-          track.enabled = true;
-        });
+      gameVoiceEnabled =
+        true;
 
       micEnabled = true;
 
-      updateGameVoiceButton();
-      updateMicUI();
+      setTracksEnabled(true);
 
-      callAllVoicePeers();
+      updateMicUI();
+      updateGameVoiceUI();
+
+      /*
+       * Reativa as chamadas imediatamente.
+       */
+      connectVoiceToEveryone();
 
     } catch (_) {
 
-      gameVoiceEnabled = false;
+      gameVoiceEnabled =
+        false;
 
-      updateGameVoiceButton();
+      updateGameVoiceUI();
     }
   }
 );
 
 
 /* =========================================================
-   START BUTTON
-   ========================================================= */
+   COMEÇAR PARTIDA
+========================================================= */
 
 startButton.addEventListener(
   "click",
@@ -1381,69 +1580,59 @@ startButton.addEventListener(
       return;
     }
 
-    if (players.size < 1) {
+    if (gameStarted) {
       return;
     }
 
-    if (gameStarted) {
+    if (players.size < 1) {
       return;
     }
 
     gameStarted = true;
     currentRound = 1;
 
-    gameVoiceEnabled = false;
-
-    if (localStream) {
-      localStream
-        .getAudioTracks()
-        .forEach(track => {
-          track.enabled = false;
-        });
-    }
-
-    updateGameVoiceButton();
-
     broadcast({
-      type: "START_GAME",
-      round: 1
+      type:
+        "START_GAME",
+
+      round:
+        currentRound
     });
 
-    startGameForEveryone(1);
+    startGame(
+      currentRound
+    );
   }
 );
 
-
-/* =========================================================
-   GAME START
-   ========================================================= */
-
-function startGameForEveryone(round) {
+function startGame(
+  round
+) {
 
   gameStarted = true;
-  roundRunning = true;
-  currentRound = round || 1;
+
+  currentRound =
+    round || 1;
 
   /*
-   * A voz da partida começa DESLIGADA.
+   * A partida não mexe no estado da voz
+   * até uma etapa que realmente precise.
+   *
+   * Portanto vocês conseguem conversar
+   * normalmente na partida.
    */
-  gameVoiceEnabled = false;
-
-  if (localStream) {
-    localStream
-      .getAudioTracks()
-      .forEach(track => {
-        track.enabled = false;
-      });
-  }
-
-  updateGameVoiceButton();
-
-  startButton.classList.add("hidden");
-
   showScreen(gameScreen);
 
-  updateGamePlayerCount();
+  gameVoiceEnabled =
+    micEnabled;
+
+  updateGameVoiceUI();
+
+  roundText.textContent =
+    `Rodada ${currentRound}`;
+
+  gamePlayers.textContent =
+    `${players.size}/5`;
 
   startCountdown(
     currentRound
@@ -1452,10 +1641,12 @@ function startGameForEveryone(round) {
 
 
 /* =========================================================
-   COUNTDOWN
-   ========================================================= */
+   CONTAGEM
+========================================================= */
 
-function startCountdown(round) {
+function startCountdown(
+  round
+) {
 
   hideGameScreens();
 
@@ -1471,342 +1662,205 @@ function startCountdown(round) {
   countdownNumber.textContent =
     count;
 
-  clearInterval(countdownTimer);
+  clearInterval(
+    countdownTimer
+  );
 
-  countdownTimer = setInterval(() => {
+  countdownTimer =
+    setInterval(
+      () => {
 
-    count--;
+        count--;
 
-    countdownNumber.textContent =
-      count;
+        countdownNumber.textContent =
+          count;
 
-    if (count <= 0) {
+        if (count <= 0) {
 
-      clearInterval(
-        countdownTimer
-      );
+          clearInterval(
+            countdownTimer
+          );
+
+          countdownTimer =
+            null;
+
+          if (isHost) {
+
+            broadcast({
+              type:
+                "REFERENCE"
+            });
+
+            startReference();
+
+          } else {
+
+            /*
+             * Convidados recebem REFERENCE.
+             */
+          }
+        }
+
+      },
+      1000
+    );
+}
+
+
+/* =========================================================
+   REFERÊNCIA
+========================================================= */
+
+function startReference() {
+
+  hideGameScreens();
+
+  referenceScreen.classList.remove(
+    "hidden"
+  );
+
+  referenceStatus.textContent =
+    "Ouça com atenção.";
+
+  /*
+   * Pequena pausa para sincronizar
+   * a interface de todos.
+   */
+  setTimeout(
+    () => {
+
+      playReferenceSound();
+
+    },
+    800
+  );
+
+  setTimeout(
+    () => {
 
       if (isHost) {
 
         broadcast({
-          type: "REFERENCE",
-          round: currentRound
+          type:
+            "RECORD_START"
         });
 
-        startHostReference();
-
-      } else {
-        startGuestReference();
+        startRecording();
       }
+
+    },
+    5500
+  );
+}
+
+referenceButton.addEventListener(
+  "click",
+  () => {
+    playReferenceSound();
+  }
+);
+
+function playReferenceSound() {
+
+  try {
+
+    if (
+      referenceAudioContext
+    ) {
+      referenceAudioContext.close();
     }
 
-  }, 1000);
-}
-
-function startGuestCountdown(round) {
-  startGameForEveryone(
-    round || 1
-  );
-}
-
-
-/* =========================================================
-   REFERENCE
-   ========================================================= */
-
-function startHostReference() {
-
-  hideGameScreens();
-
-  referenceScreen.classList.remove(
-    "hidden"
-  );
-
-  referenceStatus.textContent =
-    "O som será reproduzido automaticamente.";
-
-  /*
-   * Não começa instantaneamente.
-   * Dá tempo para todo mundo enxergar a tela.
-   */
-  setTimeout(() => {
-
-    playReference();
-
-    referenceStatus.textContent =
-      "Agora preste atenção.";
-
-    setTimeout(() => {
-
-      if (isHost) {
-
-        broadcast({
-          type: "RECORD_START",
-          round: currentRound
-        });
-
-        startHostRecording();
-      }
-
-    }, 5500);
-
-  }, 1500);
-}
-
-function startGuestReference() {
-
-  hideGameScreens();
-
-  referenceScreen.classList.remove(
-    "hidden"
-  );
-
-  referenceStatus.textContent =
-    "O som será reproduzido.";
-
-  setTimeout(() => {
-
-    playReference();
-
-    referenceStatus.textContent =
-      "Agora preste atenção.";
-
-  }, 1500);
-}
-
-function playReference() {
-
-  /*
-   * Som de referência simples.
-   * A estrutura já fica preparada para
-   * receber os packs reais depois.
-   */
-
-  if (referenceAudio) {
-    try {
-      referenceAudio.pause();
-    } catch (_) {}
-  }
-
-  const audioContext =
-    new (
+    const AudioCtx =
       window.AudioContext ||
-      window.webkitAudioContext
-    )();
+      window.webkitAudioContext;
 
-  const oscillator =
-    audioContext.createOscillator();
+    referenceAudioContext =
+      new AudioCtx();
 
-  const gain =
-    audioContext.createGain();
+    const ctx =
+      referenceAudioContext;
 
-  oscillator.type = "sine";
+    const oscillator =
+      ctx.createOscillator();
 
-  oscillator.frequency.value =
-    440;
+    const gain =
+      ctx.createGain();
 
-  gain.gain.value =
-    0.001;
+    oscillator.type =
+      "sine";
 
-  oscillator.connect(gain);
-  gain.connect(
-    audioContext.destination
-  );
+    oscillator.frequency.value =
+      440;
 
-  const now =
-    audioContext.currentTime;
+    gain.gain.value =
+      0.001;
 
-  oscillator.start(now);
+    oscillator.connect(gain);
+    gain.connect(
+      ctx.destination
+    );
 
-  gain.gain.exponentialRampToValueAtTime(
-    0.35,
-    now + 0.05
-  );
+    const now =
+      ctx.currentTime;
 
-  gain.gain.exponentialRampToValueAtTime(
-    0.001,
-    now + 0.35
-  );
+    oscillator.start(now);
 
-  oscillator.stop(
-    now + 0.4
-  );
+    gain.gain.exponentialRampToValueAtTime(
+      0.3,
+      now + 0.04
+    );
 
-  referenceAudio = oscillator;
+    gain.gain.exponentialRampToValueAtTime(
+      0.001,
+      now + 0.35
+    );
+
+    oscillator.stop(
+      now + 0.4
+    );
+
+    referenceStatus.textContent =
+      "Som reproduzido. Prepare sua imitação.";
+
+  } catch (_) {}
 }
 
 
 /* =========================================================
-   RECORDING
-   ========================================================= */
+   GRAVAÇÃO
+========================================================= */
 
-async function startHostRecording() {
-
-  hideGameScreens();
-
-  recordScreen.classList.remove(
-    "hidden"
-  );
-
-  await prepareRecording();
-
-  beginRecordingTimer();
-}
-
-async function startGuestRecording() {
+async function startRecording() {
 
   hideGameScreens();
 
   recordScreen.classList.remove(
     "hidden"
   );
-
-  await prepareRecording();
-
-  beginRecordingTimer();
-}
-
-async function prepareRecording() {
 
   recordStatus.textContent =
     "Prepare-se...";
 
   /*
-   * Voz da partida fica desligada durante
-   * a gravação para ninguém ouvir os outros.
+   * Durante a gravação ninguém transmite
+   * voz pelo chat.
    */
-  if (localStream) {
-    localStream
-      .getAudioTracks()
-      .forEach(track => {
-        track.enabled = false;
-      });
-  }
+  gameVoiceEnabled =
+    false;
 
-  try {
-    await requestMicrophone();
-  } catch (_) {
-    recordStatus.textContent =
-      "Microfone não disponível.";
-  }
+  setTracksEnabled(false);
 
-  recordedChunks = [];
-  recordedBlob = null;
-
-  if (recordedUrl) {
-    URL.revokeObjectURL(
-      recordedUrl
-    );
-
-    recordedUrl = null;
-  }
-
-  await sleep(700);
-
-  startMediaRecorder();
-}
-
-function startMediaRecorder() {
-
-  if (!localStream) {
-    return;
-  }
-
-  const audioTracks =
-    localStream.getAudioTracks();
-
-  if (!audioTracks.length) {
-    return;
-  }
-
-  const recordingStream =
-    new MediaStream(audioTracks);
-
-  let options = {};
-
-  if (
-    MediaRecorder.isTypeSupported(
-      "audio/webm;codecs=opus"
-    )
-  ) {
-    options.mimeType =
-      "audio/webm;codecs=opus";
-  }
+  updateGameVoiceUI();
 
   try {
 
-    mediaRecorder =
-      new MediaRecorder(
-        recordingStream,
-        options
-      );
+    await getMicrophone();
 
-  } catch (_) {
+  } catch (_) {}
 
-    try {
-      mediaRecorder =
-        new MediaRecorder(
-          recordingStream
-        );
-    } catch (error) {
-      console.error(
-        "MediaRecorder error:",
-        error
-      );
+  await sleep(900);
 
-      return;
-    }
-  }
-
-  mediaRecorder.ondataavailable =
-    (event) => {
-
-      if (
-        event.data &&
-        event.data.size > 0
-      ) {
-        recordedChunks.push(
-          event.data
-        );
-      }
-    };
-
-  mediaRecorder.onstop = () => {
-
-    recordedBlob =
-      new Blob(
-        recordedChunks,
-        {
-          type:
-            mediaRecorder.mimeType ||
-            "audio/webm"
-        }
-      );
-
-    recordedUrl =
-      URL.createObjectURL(
-        recordedBlob
-      );
-
-    recordStatus.textContent =
-      "Gravação concluída.";
-
-    if (isHost) {
-      finishRecordingHost();
-    }
-  };
-
-  try {
-    mediaRecorder.start();
-  } catch (error) {
-    console.error(
-      "Recording start error:",
-      error
-    );
-  }
-}
-
-function beginRecordingTimer() {
+  beginRecorder();
 
   let seconds = 7;
 
@@ -1816,78 +1870,169 @@ function beginRecordingTimer() {
   recordStatus.textContent =
     "Gravando...";
 
-  clearInterval(recordTimer);
+  clearInterval(
+    recordTimer
+  );
 
   recordTimer =
-    setInterval(() => {
+    setInterval(
+      () => {
 
-      seconds--;
+        seconds--;
 
-      recordTimerElement.textContent =
-        seconds;
+        recordTimerElement.textContent =
+          seconds;
 
-      if (seconds <= 0) {
+        if (seconds <= 0) {
 
-        clearInterval(
-          recordTimer
-        );
+          clearInterval(
+            recordTimer
+          );
 
-        recordTimer = null;
+          recordTimer =
+            null;
 
-        stopMediaRecorder();
-      }
+          stopRecorder();
+        }
 
-    }, 1000);
+      },
+      1000
+    );
 }
 
-function stopMediaRecorder() {
+function beginRecorder() {
+
+  if (!localStream) {
+    return;
+  }
+
+  recordedChunks = [];
+
+  if (recordedUrl) {
+
+    URL.revokeObjectURL(
+      recordedUrl
+    );
+
+    recordedUrl = null;
+  }
+
+  recordedBlob = null;
+
+  const tracks =
+    localStream.getAudioTracks();
+
+  if (!tracks.length) {
+    return;
+  }
+
+  const stream =
+    new MediaStream(tracks);
+
+  let options = {};
+
+  if (
+    MediaRecorder.isTypeSupported(
+      "audio/webm;codecs=opus"
+    )
+  ) {
+
+    options.mimeType =
+      "audio/webm;codecs=opus";
+  }
+
+  try {
+
+    mediaRecorder =
+      new MediaRecorder(
+        stream,
+        options
+      );
+
+  } catch (_) {
+
+    mediaRecorder =
+      new MediaRecorder(
+        stream
+      );
+  }
+
+  mediaRecorder.ondataavailable =
+    event => {
+
+      if (
+        event.data &&
+        event.data.size
+      ) {
+
+        recordedChunks.push(
+          event.data
+        );
+      }
+    };
+
+  mediaRecorder.onstop =
+    () => {
+
+      recordedBlob =
+        new Blob(
+          recordedChunks,
+          {
+            type:
+              mediaRecorder.mimeType ||
+              "audio/webm"
+          }
+        );
+
+      recordedUrl =
+        URL.createObjectURL(
+          recordedBlob
+        );
+
+      recordStatus.textContent =
+        "Gravação concluída.";
+
+      if (isHost) {
+
+        setTimeout(
+          () => {
+
+            broadcast({
+              type:
+                "PLAYBACK_START"
+            });
+
+            startPlayback();
+
+          },
+          1000
+        );
+      }
+    };
+
+  try {
+    mediaRecorder.start();
+  } catch (_) {}
+}
+
+function stopRecorder() {
 
   if (
     mediaRecorder &&
-    mediaRecorder.state !== "inactive"
+    mediaRecorder.state !==
+      "inactive"
   ) {
 
     try {
       mediaRecorder.stop();
     } catch (_) {}
-  } else {
-
-    if (isHost) {
-      finishRecordingHost();
-    }
   }
 }
 
 
 /* =========================================================
-   RECORDING FINISHED
-   ========================================================= */
-
-function finishRecordingHost() {
-
-  /*
-   * Para uma versão P2P simples,
-   * o host mostra primeiro a própria gravação.
-   * A estrutura já fica preparada para
-   * enviar os blobs futuramente.
-   */
-
-  setTimeout(() => {
-
-    broadcast({
-      type: "PLAYBACK_START",
-      round: currentRound
-    });
-
-    startPlayback();
-
-  }, 1000);
-}
-
-function startGuestPlayback(message) {
-
-  startPlayback();
-}
+   PLAYBACK
+========================================================= */
 
 function startPlayback() {
 
@@ -1898,149 +2043,133 @@ function startPlayback() {
   );
 
   /*
-   * Voz normal fica desligada durante playback.
+   * Aqui ninguém transmite voz.
+   * O áudio recebido continua existindo,
+   * mas as faixas locais ficam desligadas.
    */
-  if (localStream) {
-    localStream
-      .getAudioTracks()
-      .forEach(track => {
-        track.enabled = false;
-      });
-  }
+  setTracksEnabled(false);
+
+  gameVoiceEnabled =
+    false;
+
+  updateGameVoiceUI();
 
   playbackName.textContent =
     username;
 
   playbackStatus.textContent =
-    "Reproduzindo gravação...";
+    "Ouça a gravação.";
+
+  let seconds = 7;
+
+  playbackTimer.textContent =
+    seconds;
+
+  clearInterval(
+    playbackTimerHandle
+  );
+
+  if (activePlaybackAudio) {
+
+    try {
+      activePlaybackAudio.pause();
+    } catch (_) {}
+
+    activePlaybackAudio = null;
+  }
 
   if (recordedUrl) {
 
-    const audio =
-      new Audio(recordedUrl);
+    activePlaybackAudio =
+      new Audio(
+        recordedUrl
+      );
 
-    audio.volume = 1;
+    activePlaybackAudio.volume =
+      1;
 
-    const duration =
-      7;
+    activePlaybackAudio.preload =
+      "auto";
 
-    let remaining = duration;
+    activePlaybackAudio
+      .play()
+      .catch(() => {});
 
-    playbackTimer.textContent =
-      remaining;
+  } else {
 
-    clearInterval(
-      playbackTimerHandle
-    );
+    playbackStatus.textContent =
+      "Gravação indisponível.";
+  }
 
-    playbackTimerHandle =
-      setInterval(() => {
+  playbackTimerHandle =
+    setInterval(
+      () => {
 
-        remaining--;
+        seconds--;
 
         playbackTimer.textContent =
-          Math.max(remaining, 0);
+          Math.max(
+            0,
+            seconds
+          );
 
-        if (remaining <= 0) {
+        if (seconds <= 0) {
 
           clearInterval(
             playbackTimerHandle
           );
 
-          if (isHost) {
-            finishRound();
-          }
+          playbackTimerHandle =
+            null;
+
+          finishRound();
         }
 
-      }, 1000);
-
-    audio.play().catch(() => {});
-
-  } else {
-
-    playbackTimer.textContent =
-      "0";
-
-    playbackStatus.textContent =
-      "Nenhuma gravação disponível.";
-
-    setTimeout(() => {
-
-      if (isHost) {
-        finishRound();
-      }
-
-    }, 1500);
-  }
+      },
+      1000
+    );
 }
 
 
 /* =========================================================
-   RESULT
-   ========================================================= */
+   PONTUAÇÃO
+========================================================= */
 
 function calculateScore() {
 
+  /*
+   * Não usa mais o tamanho do arquivo
+   * como se fosse uma IA.
+   *
+   * Silêncio recebe 0.
+   */
   if (
     !recordedBlob ||
-    recordedBlob.size < 1000
+    recordedBlob.size < 4000
   ) {
     return 0;
   }
 
   /*
-   * Evita o bug antigo onde silêncio
-   * recebia uma pontuação alta.
-   *
-   * Ainda é uma pontuação básica.
-   * O sistema de análise de melodia/rítmo
-   * será colocado separado depois.
+   * Base provisória enquanto o analisador
+   * real de áudio não foi colocado.
    */
-
-  const size =
-    recordedBlob.size;
-
-  if (size < 4000) {
-    return 0;
-  }
-
-  if (size < 9000) {
-    return 20;
-  }
-
-  if (size < 16000) {
-    return 40;
-  }
-
-  if (size < 30000) {
-    return 55;
-  }
-
-  if (size < 60000) {
-    return 70;
-  }
-
-  if (size < 100000) {
-    return 80;
-  }
-
-  return 90;
+  return 50;
 }
 
 function finishRound() {
 
+  if (activePlaybackAudio) {
+
+    try {
+      activePlaybackAudio.pause();
+    } catch (_) {}
+
+    activePlaybackAudio = null;
+  }
+
   const score =
     calculateScore();
-
-  roundScores[username] =
-    score;
-
-  totalScores[username] =
-    (totalScores[username] || 0) +
-    score;
-
-  resultText.textContent =
-    `Você fez ${score} pontos nesta rodada.`;
 
   hideGameScreens();
 
@@ -2048,48 +2177,76 @@ function finishRound() {
     "hidden"
   );
 
+  resultText.textContent =
+    `Você fez ${score} pontos nesta rodada.`;
+
+  /*
+   * Depois do playback a conversa volta.
+   */
+  if (micEnabled) {
+
+    gameVoiceEnabled =
+      true;
+
+    setTracksEnabled(true);
+
+    updateGameVoiceUI();
+
+    connectVoiceToEveryone();
+  }
+
   if (isHost) {
 
     broadcast({
-      type: "ROUND_RESULT",
-      scores: {
-        [username]: score
-      },
-      round: currentRound
+      type:
+        "ROUND_RESULT",
+
+      score,
+
+      round:
+        currentRound
     });
 
-    setTimeout(() => {
+    setTimeout(
+      () => {
 
-      if (
-        currentRound >= MAX_ROUNDS
-      ) {
+        if (
+          currentRound >=
+          MAX_ROUNDS
+        ) {
 
-        broadcast({
-          type: "GAME_FINISH"
-        });
+          broadcast({
+            type:
+              "GAME_FINISH"
+          });
 
-        finishGame();
+          finishGame();
 
-      } else {
+        } else {
 
-        currentRound++;
+          currentRound++;
 
-        broadcast({
-          type: "GAME_COUNTDOWN",
-          round: currentRound
-        });
+          broadcast({
+            type:
+              "ROUND_COUNTDOWN",
 
-        startCountdown(
-          currentRound
-        );
-      }
+            round:
+              currentRound
+          });
 
-    }, 4000);
+          startCountdown(
+            currentRound
+          );
+        }
+
+      },
+      4500
+    );
   }
 }
 
-function showGuestResult(
-  scores,
+function showResult(
+  score,
   round
 ) {
 
@@ -2099,36 +2256,35 @@ function showGuestResult(
     "hidden"
   );
 
-  const score =
-    scores?.[username];
-
-  if (
+  resultText.textContent =
     typeof score === "number"
-  ) {
+      ? `Você fez ${score} pontos nesta rodada.`
+      : "Rodada concluída.";
 
-    totalScores[username] =
-      (totalScores[username] || 0) +
-      score;
+  /*
+   * Conversa volta depois do playback.
+   */
+  if (micEnabled) {
 
-    resultText.textContent =
-      `Você fez ${score} pontos nesta rodada.`;
+    gameVoiceEnabled =
+      true;
 
-  } else {
+    setTracksEnabled(true);
 
-    resultText.textContent =
-      "Rodada concluída.";
+    updateGameVoiceUI();
+
+    connectVoiceToEveryone();
   }
 }
 
 
 /* =========================================================
-   FINISH GAME
-   ========================================================= */
+   FINAL
+========================================================= */
 
 function finishGame() {
 
   gameStarted = false;
-  roundRunning = false;
 
   clearInterval(
     countdownTimer
@@ -2146,39 +2302,53 @@ function finishGame() {
   recordTimer = null;
   playbackTimerHandle = null;
 
-  if (localStream) {
-    localStream
-      .getAudioTracks()
-      .forEach(track => {
-        track.enabled = micEnabled;
-      });
+  if (activePlaybackAudio) {
+
+    try {
+      activePlaybackAudio.pause();
+    } catch (_) {}
+
+    activePlaybackAudio = null;
   }
 
-  gameVoiceEnabled = false;
+  /*
+   * Voz normal volta ao terminar.
+   */
+  if (micEnabled) {
+    setTracksEnabled(true);
+    gameVoiceEnabled = true;
+  } else {
+    gameVoiceEnabled = false;
+  }
 
-  updateGameVoiceButton();
+  updateGameVoiceUI();
 
-  setTimeout(() => {
+  setTimeout(
+    () => {
 
-    setStatus(
-      "Partida finalizada."
-    );
-
-    showScreen(roomScreen);
-
-    if (isHost) {
-      startButton.classList.remove(
-        "hidden"
+      showScreen(
+        roomScreen
       );
-    }
 
-  }, 1000);
+      setStatus(
+        "Partida finalizada."
+      );
+
+      if (isHost) {
+        startButton.classList.remove(
+          "hidden"
+        );
+      }
+
+    },
+    1000
+  );
 }
 
 
 /* =========================================================
-   GAME UI
-   ========================================================= */
+   UI GAME
+========================================================= */
 
 function hideGameScreens() {
 
@@ -2205,15 +2375,83 @@ function hideGameScreens() {
 
 
 /* =========================================================
-   LEAVE ROOM
-   ========================================================= */
+   COPIAR
+========================================================= */
+
+copyCodeButton.addEventListener(
+  "click",
+  async () => {
+
+    try {
+
+      await navigator.clipboard.writeText(
+        roomCode
+      );
+
+      copyCodeButton.textContent =
+        "Código copiado";
+
+      setTimeout(
+        () => {
+          copyCodeButton.textContent =
+            "Copiar código";
+        },
+        1400
+      );
+
+    } catch (_) {
+
+      setStatus(
+        "Código: " +
+        roomCode
+      );
+    }
+  }
+);
+
+
+/* =========================================================
+   SAIR
+========================================================= */
 
 leaveRoomButton.addEventListener(
   "click",
-  () => {
-    leaveEverything();
-  }
+  leaveEverything
 );
+
+function sendLeave() {
+
+  if (
+    !peer ||
+    peer.destroyed ||
+    isHost
+  ) {
+    return;
+  }
+
+  const connection =
+    roomConnections.get(
+      roomPeerId
+    );
+
+  if (
+    connection &&
+    connection.open
+  ) {
+
+    try {
+
+      connection.send({
+        type:
+          "LEAVE",
+
+        id:
+          peer.id
+      });
+
+    } catch (_) {}
+  }
+}
 
 function leaveEverything() {
 
@@ -2222,12 +2460,17 @@ function leaveEverything() {
   stopHeartbeat();
 
   if (pruneTimer) {
-    clearInterval(pruneTimer);
+
+    clearInterval(
+      pruneTimer
+    );
+
     pruneTimer = null;
   }
 
   roomConnections.forEach(
     connection => {
+
       try {
         connection.close();
       } catch (_) {}
@@ -2238,6 +2481,7 @@ function leaveEverything() {
 
   voiceCalls.forEach(
     call => {
+
       try {
         call.close();
       } catch (_) {}
@@ -2248,6 +2492,7 @@ function leaveEverything() {
 
   remoteAudioElements.forEach(
     audio => {
+
       try {
         audio.pause();
         audio.srcObject = null;
@@ -2262,22 +2507,35 @@ function leaveEverything() {
 
     localStream
       .getTracks()
-      .forEach(track => {
-        track.stop();
-      });
+      .forEach(
+        track => track.stop()
+      );
 
     localStream = null;
   }
 
-  micEnabled = false;
-  gameVoiceEnabled = false;
+  cleanupPeer();
 
   players.clear();
 
   roomCode = "";
   roomPeerId = "";
+
   isHost = false;
   gameStarted = false;
+
+  micEnabled = false;
+  gameVoiceEnabled = false;
+
+  updateMicUI();
+  updateGameVoiceUI();
+
+  showScreen(
+    homeScreen
+  );
+}
+
+function cleanupPeer() {
 
   if (peer) {
 
@@ -2287,19 +2545,44 @@ function leaveEverything() {
 
     peer = null;
   }
-
-  updateMicUI();
-  updateGameVoiceButton();
-
-  showScreen(homeScreen);
 }
+
+window.addEventListener(
+  "beforeunload",
+  sendLeave
+);
 
 
 /* =========================================================
-   STARTUP
-   ========================================================= */
+   LOGOUT
+========================================================= */
+
+logoutButton.addEventListener(
+  "click",
+  () => {
+
+    leaveEverything();
+
+    localStorage.removeItem(
+      "shadow_games_username"
+    );
+
+    username = "";
+
+    usernameInput.value = "";
+
+    showScreen(
+      loginScreen
+    );
+  }
+);
+
+
+/* =========================================================
+   INICIALIZAÇÃO
+========================================================= */
 
 updateMicUI();
-updateGameVoiceButton();
+updateGameVoiceUI();
 
-loadSavedUser();
+loadUser();
