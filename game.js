@@ -1,16 +1,39 @@
 "use strict";
 
-const $ = id => document.getElementById(id);
+/*
+  SHADOW GAMES
+  Multiplayer P2P
+  PeerJS + WebRTC
 
-const loginScreen = $("login");
-const homeScreen = $("home");
-const roomScreen = $("room");
-const gameScreen = $("game");
+  Principais correções:
+  - Cada jogador possui playerId próprio.
+  - Nome fica associado ao playerId.
+  - Sala nunca usa o nome local para desenhar outro jogador.
+  - Gravações são enviadas por DataConnection.
+  - Áudios grandes são divididos em chunks.
+  - Host reúne todas as gravações.
+  - Host distribui as gravações para os jogadores.
+  - Playback usa o áudio REAL gravado.
+  - Pontuação analisa energia, duração, ritmo e presença de voz/som.
+*/
+
+
+/* =========================================================
+   ELEMENTOS
+========================================================= */
+
+const $ = (id) => document.getElementById(id);
+
+const loginSection = $("login");
+const homeSection = $("home");
+const roomSection = $("room");
+const gameSection = $("game");
 
 const usernameInput = $("username");
 const loginButton = $("loginButton");
 const loginStatus = $("loginStatus");
 
+const profileAvatar = $("profileAvatar");
 const profileName = $("profileName");
 
 const createButton = $("create");
@@ -26,215 +49,320 @@ const joinStatus = $("joinStatus");
 const roomCodeElement = $("roomCode");
 const copyCodeButton = $("copyCode");
 
+const connectionBadge = $("connectionBadge");
 const statusElement = $("status");
+
+const micButton = $("micButton");
+const voiceStatus = $("voiceStatus");
+
+const playerCountElement = $("playerCount");
 const playersElement = $("players");
 
 const startButton = $("start");
 const leaveRoomButton = $("leaveRoom");
 
-const micButton = $("micButton");
-const voiceStatus = $("voiceStatus");
-
-const remoteAudios = $("remoteAudios");
-
 const gameVoiceButton = $("gameVoiceButton");
-const gamePlayers = $("gamePlayers");
 
 const roundText = $("roundText");
+const gamePlayers = $("gamePlayers");
 
 const countdownScreen = $("countdownScreen");
 const countdownNumber = $("countdownNumber");
+const countdownHint = $("countdownHint");
 
 const referenceScreen = $("referenceScreen");
+const referenceDescription = $("referenceDescription");
+const referenceType = $("referenceType");
 const referenceButton = $("referenceButton");
-const referenceStatus = $("referenceStatus");
+const referenceWait = $("referenceWait");
 
 const recordScreen = $("recordScreen");
 const recordTimerElement = $("recordTimer");
 const recordStatus = $("recordStatus");
 
+const uploadScreen = $("uploadScreen");
+const uploadProgressBar = $("uploadProgressBar");
+const uploadProgressText = $("uploadProgressText");
+
 const playbackScreen = $("playbackScreen");
-const playbackName = $("playbackName");
-const playbackTimer = $("playbackTimer");
+const playbackPlayerName = $("playbackPlayerName");
 const playbackStatus = $("playbackStatus");
+const playbackScore = $("playbackScore");
 
 const resultScreen = $("resultScreen");
+const resultList = $("resultList");
 const resultText = $("resultText");
+
+const finalScreen = $("finalScreen");
+const finalList = $("finalList");
+const backToRoomButton = $("backToRoom");
+
+const remoteAudios = $("remoteAudios");
 
 
 /* =========================================================
-   ESTADO
+   CONSTANTES
+========================================================= */
+
+const MAX_PLAYERS = 5;
+const TOTAL_ROUNDS = 4;
+
+const RECORD_SECONDS = 7;
+const REFERENCE_DELAY = 3500;
+
+const HEARTBEAT_INTERVAL = 1500;
+const PLAYER_TIMEOUT = 6000;
+
+const CHUNK_SIZE = 24 * 1024;
+
+
+/* =========================================================
+   ESTADO DO USUÁRIO
 ========================================================= */
 
 let username = "";
+let playerId = "";
 
 let peer = null;
+let myPeerId = "";
+
 let isHost = false;
-
 let roomCode = "";
-let roomPeerId = "";
+let hostPeerId = "";
 
-let players = new Map();
-let roomConnections = new Map();
+let joinedRoom = false;
+let gameStarted = false;
 
 let localStream = null;
 let micEnabled = false;
 let gameVoiceEnabled = false;
 
-let voiceCalls = new Map();
-let remoteAudioElements = new Map();
-
-let heartbeatTimer = null;
-let pruneTimer = null;
-
-let gameStarted = false;
 let currentRound = 1;
 
-const MAX_ROUNDS = 4;
-
-let countdownTimer = null;
+let heartbeatTimer = null;
+let roundTimer = null;
 let recordTimer = null;
-let playbackTimerHandle = null;
 
-let mediaRecorder = null;
-let recordedChunks = [];
+let recorder = null;
+let recordingChunks = [];
 
-let recordedBlob = null;
-let recordedUrl = null;
+let currentRecordingBlob = null;
 
-let referenceAudioContext = null;
+let currentReferenceData = null;
+let currentReferenceBuffer = null;
 
-let activePlaybackAudio = null;
+let referencePlayed = false;
+let recordingStarted = false;
+
+let playbackAudio = null;
+
+let waitingForRecordings = false;
+
+let roomPlayers = {};
 
 
 /* =========================================================
-   UTILIDADES
+   CONEXÕES DE DADOS
 ========================================================= */
 
-function showScreen(screen) {
-  loginScreen.classList.add("hidden");
-  homeScreen.classList.add("hidden");
-  roomScreen.classList.add("hidden");
-  gameScreen.classList.add("hidden");
+const dataConnections = new Map();
 
-  screen.classList.remove("hidden");
-}
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+/* =========================================================
+   CONEXÕES DE VOZ
+========================================================= */
 
-function normalizeRoomCode(value) {
-  return String(value || "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .slice(0, 8);
-}
+const voiceCalls = new Map();
+const incomingVoiceCalls = new Map();
 
-function randomCode(length = 6) {
-  const chars =
-    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-  let result = "";
+/* =========================================================
+   GRAVAÇÕES
+========================================================= */
 
-  for (let i = 0; i < length; i++) {
-    result += chars[
-      Math.floor(Math.random() * chars.length)
-    ];
+/*
+  recordings[round][playerId] = {
+    playerId,
+    name,
+    blob,
+    url,
+    size,
+    received
   }
+*/
 
-  return result;
-}
+const recordings = {};
 
-function randomPlayerId() {
-  return (
-    "shadow-player-" +
-    Math.random().toString(36).slice(2, 12)
-  );
-}
 
-function setStatus(text) {
-  statusElement.textContent = text || "";
-}
+/*
+  transferBuffers[round][playerId] = {
+    name,
+    mimeType,
+    totalChunks,
+    chunks: [],
+    received: 0,
+    totalBytes: 0
+  }
+*/
 
-function setJoinStatus(text) {
-  joinStatus.textContent = text || "";
-}
+const transferBuffers = {};
+
+
+/*
+  scores[round][playerId]
+*/
+
+const scores = {};
 
 
 /* =========================================================
    LOGIN
 ========================================================= */
 
+function createPlayerId() {
+
+  let id = localStorage.getItem("shadow_player_id");
+
+  if (!id) {
+
+    id =
+      "player-" +
+      Date.now().toString(36) +
+      "-" +
+      Math.random().toString(36).slice(2, 10);
+
+    localStorage.setItem(
+      "shadow_player_id",
+      id
+    );
+  }
+
+  return id;
+}
+
+
+function loadLogin() {
+
+  const savedName =
+    localStorage.getItem("shadow_username");
+
+  if (savedName) {
+
+    username = savedName;
+    playerId = createPlayerId();
+
+    showHome();
+  }
+}
+
+
 function login() {
-  const name = usernameInput.value.trim();
+
+  const name =
+    usernameInput.value
+      .trim()
+      .replace(/\s+/g, " ");
 
   if (!name) {
+
     loginStatus.textContent =
       "Digite um nome.";
+
+    return;
+  }
+
+  if (name.length < 2) {
+
+    loginStatus.textContent =
+      "Use pelo menos 2 caracteres.";
+
     return;
   }
 
   username = name.slice(0, 16);
 
+  playerId = createPlayerId();
+
   localStorage.setItem(
-    "shadow_games_username",
+    "shadow_username",
     username
   );
 
-  profileName.textContent =
-    username;
-
   loginStatus.textContent = "";
 
-  showScreen(homeScreen);
+  showHome();
 }
 
-loginButton.addEventListener(
-  "click",
-  login
-);
 
-usernameInput.addEventListener(
-  "keydown",
-  event => {
-    if (event.key === "Enter") {
-      login();
-    }
-  }
-);
+function logout() {
 
-function loadUser() {
-  const saved =
-    localStorage.getItem(
-      "shadow_games_username"
-    );
+  leaveRoom(true);
 
-  if (saved) {
-    username = saved;
-    usernameInput.value = saved;
-    profileName.textContent = saved;
-    showScreen(homeScreen);
-  } else {
-    showScreen(loginScreen);
-  }
+  localStorage.removeItem(
+    "shadow_username"
+  );
+
+  username = "";
+  showSection(loginSection);
 }
 
 
 /* =========================================================
-   ENTRAR EM SALA
+   TELAS
+========================================================= */
+
+function showSection(section) {
+
+  loginSection.classList.add("hidden");
+  homeSection.classList.add("hidden");
+  roomSection.classList.add("hidden");
+  gameSection.classList.add("hidden");
+
+  section.classList.remove("hidden");
+}
+
+
+function showHome() {
+
+  profileName.textContent = username;
+
+  profileAvatar.textContent =
+    username.charAt(0).toUpperCase();
+
+  showSection(homeSection);
+}
+
+
+function showRoom() {
+
+  showSection(roomSection);
+
+  if (gameStarted) {
+    gameSection.classList.remove("hidden");
+  }
+}
+
+
+function showGame() {
+
+  gameSection.classList.remove("hidden");
+  roomSection.classList.add("hidden");
+}
+
+
+/* =========================================================
+   JOIN PANEL
 ========================================================= */
 
 joinButton.addEventListener(
   "click",
   () => {
 
-    joinPanel.classList.remove(
-      "hidden"
-    );
+    joinPanel.classList.remove("hidden");
 
     joinCodeInput.value = "";
-    setJoinStatus("");
+
+    joinStatus.textContent = "";
 
     setTimeout(() => {
       joinCodeInput.focus();
@@ -242,37 +370,17 @@ joinButton.addEventListener(
   }
 );
 
+
 joinCancel.addEventListener(
   "click",
   () => {
 
-    joinPanel.classList.add(
-      "hidden"
-    );
+    joinPanel.classList.add("hidden");
 
-    joinCodeInput.value = "";
-    setJoinStatus("");
+    joinStatus.textContent = "";
   }
 );
 
-joinCodeInput.addEventListener(
-  "input",
-  () => {
-    joinCodeInput.value =
-      normalizeRoomCode(
-        joinCodeInput.value
-      );
-  }
-);
-
-joinCodeInput.addEventListener(
-  "keydown",
-  event => {
-    if (event.key === "Enter") {
-      joinConfirm.click();
-    }
-  }
-);
 
 joinConfirm.addEventListener(
   "click",
@@ -284,19 +392,71 @@ joinConfirm.addEventListener(
       );
 
     if (code.length < 4) {
-      setJoinStatus(
-        "Digite um código válido."
-      );
+
+      joinStatus.textContent =
+        "Digite um código válido.";
+
       return;
     }
 
-    setJoinStatus(
-      "Conectando..."
-    );
+    joinStatus.textContent =
+      "Entrando na sala...";
 
     joinRoom(code);
   }
 );
+
+
+joinCodeInput.addEventListener(
+  "keydown",
+  (event) => {
+
+    if (event.key === "Enter") {
+
+      joinConfirm.click();
+    }
+  }
+);
+
+
+/* =========================================================
+   ROOM CODE
+========================================================= */
+
+function generateRoomCode() {
+
+  const chars =
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+  let result = "";
+
+  for (let i = 0; i < 6; i++) {
+
+    result +=
+      chars[
+        Math.floor(
+          Math.random() * chars.length
+        )
+      ];
+  }
+
+  return result;
+}
+
+
+function normalizeRoomCode(code) {
+
+  return String(code || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 8);
+}
+
+
+function hostPeerIdFor(code) {
+
+  return "shadow-room-" + code;
+}
 
 
 /* =========================================================
@@ -308,192 +468,287 @@ createButton.addEventListener(
   createRoom
 );
 
+
 function createRoom() {
 
-  cleanupPeer();
+  if (joinedRoom) {
+    return;
+  }
+
+  roomCode =
+    generateRoomCode();
 
   isHost = true;
 
-  roomCode =
-    randomCode(6);
+  hostPeerId =
+    hostPeerIdFor(roomCode);
 
-  roomPeerId =
-    "shadow-room-" +
+  connectionBadge.textContent =
+    "Criando";
+
+  startButton.disabled = true;
+
+  statusElement.textContent =
+    "Criando sala...";
+
+  roomCodeElement.textContent =
     roomCode;
 
-  peer = new Peer(
-    roomPeerId,
-    {
-      debug: 0
-    }
-  );
+  peer =
+    new Peer(
+      hostPeerId,
+      peerOptions()
+    );
 
-  setStatus(
-    "Criando sala..."
-  );
+  setupPeerEvents();
 
-  peer.on("open", () => {
+  peer.on(
+    "open",
+    () => {
 
-    players.clear();
+      myPeerId = peer.id;
 
-    players.set(
-      peer.id,
-      {
-        id: peer.id,
+      joinedRoom = true;
+
+      roomPlayers = {};
+
+      addOrUpdatePlayer({
+        playerId,
+        peerId: myPeerId,
         name: username,
-        host: true,
-        connected: true,
+        isHost: true,
         lastSeen: Date.now()
-      }
-    );
+      });
 
-    roomCodeElement.textContent =
-      roomCode;
+      connectionBadge.textContent =
+        "Online";
 
-    startButton.classList.remove(
-      "hidden"
-    );
-
-    setStatus(
-      "Sala criada. Envie o código para seus amigos."
-    );
-
-    showScreen(roomScreen);
-
-    startHeartbeat();
-    startPrune();
-
-    renderPlayers();
-  });
-
-  peer.on(
-    "connection",
-    connection => {
-      setupDataConnection(
-        connection
+      connectionBadge.classList.add(
+        "connected"
       );
-    }
-  );
 
-  peer.on(
-    "call",
-    call => {
-      answerVoiceCall(call);
-    }
-  );
+      statusElement.textContent =
+        "Sala pronta. Compartilhe o código.";
 
-  peer.on(
-    "error",
-    error => {
-      console.error(
-        "Peer:",
-        error
-      );
+      showRoom();
+
+      startHeartbeat();
+
+      updateRoomUI();
     }
   );
 }
 
 
 /* =========================================================
-   ENTRAR
+   ENTRAR NA SALA
 ========================================================= */
 
 function joinRoom(code) {
 
-  cleanupPeer();
-
-  isHost = false;
+  if (joinedRoom) {
+    return;
+  }
 
   roomCode = code;
 
-  roomPeerId =
-    "shadow-room-" +
-    code;
+  isHost = false;
 
-  peer = new Peer(
-    randomPlayerId(),
-    {
-      debug: 0
+  hostPeerId =
+    hostPeerIdFor(roomCode);
+
+  connectionBadge.textContent =
+    "Conectando";
+
+  statusElement.textContent =
+    "Entrando na sala...";
+
+  roomCodeElement.textContent =
+    roomCode;
+
+  startButton.classList.add("hidden");
+
+  joinPanel.classList.add("hidden");
+
+  showRoom();
+
+  /*
+    O peer do jogador é separado do peer da sala.
+    Isso evita misturar identidade de jogador
+    com identidade do host.
+  */
+
+  const guestId =
+    "shadow-player-" +
+    Math.random()
+      .toString(36)
+      .slice(2, 10);
+
+  peer =
+    new Peer(
+      guestId,
+      peerOptions()
+    );
+
+  setupPeerEvents();
+
+  peer.on(
+    "open",
+    () => {
+
+      myPeerId = peer.id;
+
+      joinedRoom = true;
+
+      connectionBadge.textContent =
+        "Online";
+
+      connectionBadge.classList.add(
+        "connected"
+      );
+
+      statusElement.textContent =
+        "Conectando à sala...";
+
+      startHeartbeat();
+
+      connectToHost();
+    }
+  );
+}
+
+
+/* =========================================================
+   PEER OPTIONS
+========================================================= */
+
+function peerOptions() {
+
+  return {
+    debug: 0,
+
+    config: {
+      iceServers: [
+        {
+          urls:
+            "stun:stun.l.google.com:19302"
+        }
+      ],
+
+      sdpSemantics:
+        "unified-plan"
+    }
+  };
+}
+
+
+/* =========================================================
+   PEER EVENTS
+========================================================= */
+
+function setupPeerEvents() {
+
+  if (!peer) {
+    return;
+  }
+
+
+  peer.on(
+    "connection",
+    (conn) => {
+
+      setupDataConnection(
+        conn
+      );
     }
   );
 
-  peer.on("open", () => {
-
-    const connection =
-      peer.connect(
-        roomPeerId,
-        {
-          reliable: true
-        }
-      );
-
-    setupDataConnection(
-      connection
-    );
-
-    connection.on(
-      "open",
-      () => {
-
-        connection.send({
-          type: "JOIN",
-          id: peer.id,
-          name: username
-        });
-
-        roomCodeElement.textContent =
-          roomCode;
-
-        startButton.classList.add(
-          "hidden"
-        );
-
-        setStatus(
-          "Conectado à sala."
-        );
-
-        showScreen(roomScreen);
-
-        joinPanel.classList.add(
-          "hidden"
-        );
-
-        startHeartbeat();
-
-        renderPlayers();
-      }
-    );
-
-    connection.on(
-      "error",
-      () => {
-
-        setJoinStatus(
-          "Não foi possível conectar à sala."
-        );
-      }
-    );
-  });
 
   peer.on(
     "call",
-    call => {
-      answerVoiceCall(call);
+    (call) => {
+
+      handleIncomingVoiceCall(
+        call
+      );
     }
   );
 
+
+  peer.on(
+    "disconnected",
+    () => {
+
+      connectionBadge.textContent =
+        "Reconectando";
+
+      connectionBadge.classList.remove(
+        "connected"
+      );
+
+      if (
+        peer &&
+        !peer.destroyed
+      ) {
+
+        try {
+          peer.reconnect();
+        } catch {}
+      }
+    }
+  );
+
+
   peer.on(
     "error",
-    error => {
+    (error) => {
+
+      console.warn(
+        "PeerJS:",
+        error.type
+      );
 
       if (
         error.type ===
-        "peer-unavailable"
+          "peer-unavailable" &&
+        !isHost &&
+        joinedRoom
       ) {
-        setJoinStatus(
-          "Sala não encontrada."
-        );
+
+        statusElement.textContent =
+          "Sala não encontrada ou fechada.";
+
+      } else if (
+        error.type ===
+        "unavailable-id"
+      ) {
+
+        if (isHost) {
+
+          roomCode =
+            generateRoomCode();
+
+          hostPeerId =
+            hostPeerIdFor(roomCode);
+
+          roomCodeElement.textContent =
+            roomCode;
+        }
       }
+    }
+  );
+
+
+  peer.on(
+    "close",
+    () => {
+
+      connectionBadge.textContent =
+        "Offline";
+
+      connectionBadge.classList.remove(
+        "connected"
+      );
     }
   );
 }
@@ -503,225 +758,558 @@ function joinRoom(code) {
    DATA CONNECTION
 ========================================================= */
 
-function setupDataConnection(
-  connection
-) {
+function connectToHost() {
 
-  if (!connection) {
+  if (
+    !peer ||
+    peer.destroyed
+  ) {
     return;
   }
 
-  roomConnections.set(
-    connection.peer,
-    connection
+  const conn =
+    peer.connect(
+      hostPeerId,
+      {
+        reliable: true,
+        serialization: "binary"
+      }
+    );
+
+  setupDataConnection(
+    conn
+  );
+}
+
+
+function setupDataConnection(conn) {
+
+  if (!conn) {
+    return;
+  }
+
+  const remoteId =
+    conn.peer;
+
+  const old =
+    dataConnections.get(
+      remoteId
+    );
+
+  /*
+    Evita duplicar conexões.
+  */
+
+  if (
+    old &&
+    old !== conn &&
+    old.open
+  ) {
+
+    try {
+      conn.close();
+    } catch {}
+
+    return;
+  }
+
+  dataConnections.set(
+    remoteId,
+    conn
   );
 
-  connection.on(
-    "data",
-    message => {
-      handleMessage(
-        message,
-        connection
-      );
-    }
-  );
 
-  connection.on(
+  conn.on(
     "open",
     () => {
 
-      roomConnections.set(
-        connection.peer,
-        connection
+      if (conn !== dataConnections.get(remoteId)) {
+        return;
+      }
+
+      if (isHost) {
+
+        sendToConnection(
+          conn,
+          {
+            type: "ROOM_HELLO",
+            player: {
+              playerId,
+              peerId: myPeerId,
+              name: username,
+              isHost: true
+            },
+            players:
+              serializePlayers(),
+            gameStarted
+          }
+        );
+
+      } else {
+
+        sendToConnection(
+          conn,
+          {
+            type: "JOIN",
+            player: {
+              playerId,
+              peerId: myPeerId,
+              name: username,
+              isHost: false
+            }
+          }
+        );
+      }
+
+      updateRoomUI();
+    }
+  );
+
+
+  conn.on(
+    "data",
+    (message) => {
+
+      handleDataMessage(
+        conn,
+        message
       );
     }
   );
 
-  connection.on(
+
+  conn.on(
     "close",
     () => {
 
-      roomConnections.delete(
-        connection.peer
-      );
+      if (
+        dataConnections.get(
+          remoteId
+        ) === conn
+      ) {
+
+        dataConnections.delete(
+          remoteId
+        );
+      }
 
       if (isHost) {
-        removePlayer(
-          connection.peer
+
+        removePlayerByPeerId(
+          remoteId
         );
 
-        sendRoomState();
+        broadcastRoomState();
       }
+
+      updateRoomUI();
     }
   );
 
-  connection.on(
+
+  conn.on(
     "error",
     () => {
 
-      roomConnections.delete(
-        connection.peer
-      );
+      if (
+        dataConnections.get(
+          remoteId
+        ) === conn
+      ) {
+
+        dataConnections.delete(
+          remoteId
+        );
+      }
 
       if (isHost) {
-        removePlayer(
-          connection.peer
+
+        removePlayerByPeerId(
+          remoteId
         );
 
-        sendRoomState();
+        broadcastRoomState();
       }
+
+      updateRoomUI();
     }
   );
 }
 
 
 /* =========================================================
-   MENSAGENS
+   DATA SEND
 ========================================================= */
 
-function handleMessage(
-  message,
-  connection
+function sendToConnection(
+  conn,
+  data
 ) {
 
   if (
-    !message ||
-    !message.type
+    !conn ||
+    !conn.open
   ) {
+    return false;
+  }
+
+  try {
+
+    conn.send(data);
+
+    return true;
+
+  } catch {
+
+    return false;
+  }
+}
+
+
+function sendToPeer(
+  peerIdToSend,
+  data
+) {
+
+  const conn =
+    dataConnections.get(
+      peerIdToSend
+    );
+
+  if (!conn) {
+    return false;
+  }
+
+  return sendToConnection(
+    conn,
+    data
+  );
+}
+
+
+function broadcast(
+  data,
+  exceptPeerId = null
+) {
+
+  for (
+    const [remotePeerId, conn]
+    of dataConnections
+  ) {
+
+    if (
+      remotePeerId ===
+      exceptPeerId
+    ) {
+      continue;
+    }
+
+    sendToConnection(
+      conn,
+      data
+    );
+  }
+}
+
+
+/* =========================================================
+   MESSAGE ROUTER
+========================================================= */
+
+function handleDataMessage(
+  conn,
+  message
+) {
+
+  if (!message) {
     return;
   }
 
-  switch (message.type) {
 
-    case "JOIN":
+  /*
+    Mensagem JOIN
+  */
 
-      if (isHost) {
+  if (
+    message.type ===
+    "JOIN"
+  ) {
 
-        addPlayer(
-          message.id,
-          message.name
-        );
+    if (!isHost) {
+      return;
+    }
 
-        sendRoomState();
+    handlePlayerJoin(
+      conn,
+      message.player
+    );
+
+    return;
+  }
+
+
+  /*
+    Estado da sala
+  */
+
+  if (
+    message.type ===
+    "ROOM_STATE"
+  ) {
+
+    applyRoomState(
+      message.players
+    );
+
+    if (
+      typeof message.gameStarted ===
+      "boolean"
+    ) {
+
+      gameStarted =
+        message.gameStarted;
+    }
+
+    updateRoomUI();
+
+    return;
+  }
+
+
+  /*
+    Remoção de jogador
+  */
+
+  if (
+    message.type ===
+    "PLAYER_LEFT"
+  ) {
+
+    if (
+      message.playerId
+    ) {
+
+      delete roomPlayers[
+        message.playerId
+      ];
+
+      updateRoomUI();
+    }
+
+    return;
+  }
+
+
+  /*
+    Heartbeat
+  */
+
+  if (
+    message.type ===
+    "HEARTBEAT"
+  ) {
+
+    if (
+      isHost &&
+      message.player
+    ) {
+
+      const existing =
+        roomPlayers[
+          message.player.playerId
+        ];
+
+      if (existing) {
+
+        existing.lastSeen =
+          Date.now();
+
+        existing.peerId =
+          message.player.peerId;
+
+        existing.name =
+          message.player.name;
       }
 
-      break;
+      broadcastRoomState();
+    }
+
+    return;
+  }
 
 
-    case "ROOM_STATE":
+  /*
+    Começo da partida
+  */
 
-      if (!isHost) {
-        applyRoomState(
-          message.players
-        );
-      }
+  if (
+    message.type ===
+    "GAME_START"
+  ) {
 
-      break;
+    applyGameStart(
+      message
+    );
 
-
-    case "HEARTBEAT":
-
-      if (isHost) {
-
-        const player =
-          players.get(
-            message.id
-          );
-
-        if (player) {
-          player.lastSeen =
-            Date.now();
-
-          player.connected =
-            true;
-        }
-      }
-
-      break;
+    return;
+  }
 
 
-    case "LEAVE":
+  /*
+    Referência
+  */
 
-      if (isHost) {
+  if (
+    message.type ===
+    "REFERENCE"
+  ) {
 
-        removePlayer(
-          message.id
-        );
+    applyReference(
+      message
+    );
 
-        sendRoomState();
-      }
-
-      break;
-
-
-    case "START_GAME":
-
-      if (!isHost) {
-        startGame(
-          message.round || 1
-        );
-      }
-
-      break;
+    return;
+  }
 
 
-    case "ROUND_COUNTDOWN":
+  /*
+    Começo da gravação
+  */
 
-      if (!isHost) {
-        startCountdown(
-          message.round
-        );
-      }
+  if (
+    message.type ===
+    "RECORD_START"
+  ) {
 
-      break;
+    applyRecordStart(
+      message
+    );
 
-
-    case "REFERENCE":
-
-      if (!isHost) {
-        startReference();
-      }
-
-      break;
+    return;
+  }
 
 
-    case "RECORD_START":
+  /*
+    Chunk de gravação
+  */
 
-      if (!isHost) {
-        startRecording();
-      }
+  if (
+    message.type ===
+    "RECORD_META"
+  ) {
 
-      break;
+    receiveRecordMeta(
+      message
+    );
 
-
-    case "PLAYBACK_START":
-
-      if (!isHost) {
-        startPlayback();
-      }
-
-      break;
-
-
-    case "ROUND_RESULT":
-
-      if (!isHost) {
-        showResult(
-          message.score,
-          message.round
-        );
-      }
-
-      break;
+    return;
+  }
 
 
-    case "GAME_FINISH":
+  if (
+    message.type ===
+    "RECORD_CHUNK"
+  ) {
 
-      if (!isHost) {
-        finishGame();
-      }
+    receiveRecordChunk(
+      message
+    );
 
-      break;
+    return;
+  }
+
+
+  if (
+    message.type ===
+    "RECORD_COMPLETE"
+  ) {
+
+    receiveRecordComplete(
+      message
+    );
+
+    return;
+  }
+
+
+  /*
+    Playback
+  */
+
+  if (
+    message.type ===
+    "PLAYBACK_PLAN"
+  ) {
+
+    applyPlaybackPlan(
+      message
+    );
+
+    return;
+  }
+
+
+  if (
+    message.type ===
+    "PLAYBACK_SCORE"
+  ) {
+
+    applyPlaybackScore(
+      message
+    );
+
+    return;
+  }
+
+
+  /*
+    Resultado
+  */
+
+  if (
+    message.type ===
+    "ROUND_RESULT"
+  ) {
+
+    applyRoundResult(
+      message
+    );
+
+    return;
+  }
+
+
+  /*
+    Próxima rodada
+  */
+
+  if (
+    message.type ===
+    "NEXT_ROUND"
+  ) {
+
+    applyNextRound(
+      message
+    );
+
+    return;
+  }
+
+
+  /*
+    Final
+  */
+
+  if (
+    message.type ===
+    "GAME_FINISH"
+  ) {
+
+    applyGameFinish(
+      message
+    );
+
+    return;
   }
 }
 
@@ -730,240 +1318,400 @@ function handleMessage(
    PLAYERS
 ========================================================= */
 
-function addPlayer(
-  id,
-  name
-) {
+function addOrUpdatePlayer(player) {
 
-  if (
-    !id ||
-    id === peer.id
-  ) {
+  if (!player) {
     return;
   }
 
-  players.set(
-    id,
-    {
-      id,
-      name:
-        name ||
-        "Jogador",
-      host: false,
-      connected: true,
-      lastSeen: Date.now()
-    }
-  );
-
-  renderPlayers();
-}
-
-function removePlayer(id) {
-
-  players.delete(id);
-
-  const connection =
-    roomConnections.get(id);
-
-  if (connection) {
-    try {
-      connection.close();
-    } catch (_) {}
+  if (!player.playerId) {
+    return;
   }
 
-  roomConnections.delete(id);
+  /*
+    O playerId é a identidade real.
+    Nunca substituímos o nome de outro jogador
+    pelo username local.
+  */
 
-  closeVoice(id);
+  roomPlayers[
+    player.playerId
+  ] = {
 
-  renderPlayers();
+    playerId:
+      player.playerId,
+
+    peerId:
+      player.peerId || "",
+
+    name:
+      String(
+        player.name || "Jogador"
+      ).slice(0, 16),
+
+    isHost:
+      !!player.isHost,
+
+    lastSeen:
+      Date.now(),
+
+    connected:
+      true
+  };
 }
 
-function applyRoomState(
-  list
+
+function removePlayerByPeerId(
+  peerId
 ) {
 
-  players.clear();
-
-  if (Array.isArray(list)) {
-
-    list.forEach(
-      player => {
-
-        players.set(
-          player.id,
-          player
-        );
-      }
-    );
+  if (!peerId) {
+    return;
   }
 
-  renderPlayers();
-}
+  for (
+    const id in roomPlayers
+  ) {
 
-function renderPlayers() {
+    if (
+      roomPlayers[id].peerId ===
+      peerId
+    ) {
 
-  playersElement.innerHTML = "";
+      delete roomPlayers[id];
 
-  players.forEach(
-    player => {
-
-      const row =
-        document.createElement(
-          "div"
-        );
-
-      row.className =
-        "player";
-
-      const left =
-        document.createElement(
-          "div"
-        );
-
-      left.className =
-        "player-left";
-
-      const dot =
-        document.createElement(
-          "div"
-        );
-
-      dot.className =
-        "player-dot " +
-        (
-          player.connected !== false
-            ? "online"
-            : ""
-        );
-
-      const info =
-        document.createElement(
-          "div"
-        );
-
-      const name =
-        document.createElement(
-          "div"
-        );
-
-      name.className =
-        "player-name";
-
-      name.textContent =
-        player.name +
-        (
-          player.id === peer?.id
-            ? " (você)"
-            : ""
-        );
-
-      const tag =
-        document.createElement(
-          "div"
-        );
-
-      tag.className =
-        "player-tag";
-
-      tag.textContent =
-        player.host
-          ? "Host"
-          : "Jogador";
-
-      info.appendChild(name);
-      info.appendChild(tag);
-
-      left.appendChild(dot);
-      left.appendChild(info);
-
-      row.appendChild(left);
-
-      playersElement.appendChild(row);
+      removeVoiceConnection(
+        peerId
+      );
     }
-  );
+  }
 
-  gamePlayers.textContent =
-    `${players.size}/5`;
+  updateRoomUI();
 }
 
 
-/* =========================================================
-   ROOM STATE
-========================================================= */
+function serializePlayers() {
 
-function roomPlayerList() {
-
-  return Array.from(
-    players.values()
+  return Object.values(
+    roomPlayers
   ).map(
-    player => ({
-      id: player.id,
-      name: player.name,
-      host: player.host,
-      connected: player.connected
+    (player) => ({
+
+      playerId:
+        player.playerId,
+
+      peerId:
+        player.peerId,
+
+      name:
+        player.name,
+
+      isHost:
+        player.isHost,
+
+      connected:
+        player.connected
     })
   );
 }
 
-function sendTo(
-  id,
-  message
+
+function applyRoomState(
+  players
 ) {
 
-  const connection =
-    roomConnections.get(id);
+  roomPlayers = {};
 
-  if (
-    connection &&
-    connection.open
-  ) {
-
-    try {
-      connection.send(
-        message
-      );
-
-      return true;
-
-    } catch (_) {}
+  if (!Array.isArray(players)) {
+    return;
   }
 
-  return false;
+  for (
+    const player of players
+  ) {
+
+    addOrUpdatePlayer({
+      ...player,
+      lastSeen: Date.now()
+    });
+  }
 }
 
-function broadcast(
-  message
+
+function handlePlayerJoin(
+  conn,
+  player
 ) {
 
-  roomConnections.forEach(
-    connection => {
+  if (!player) {
+    return;
+  }
 
-      if (
-        connection &&
-        connection.open
-      ) {
+  if (
+    Object.keys(roomPlayers).length >=
+    MAX_PLAYERS
+  ) {
 
-        try {
-          connection.send(
-            message
-          );
-        } catch (_) {}
+    sendToConnection(
+      conn,
+      {
+        type: "ROOM_FULL"
       }
+    );
+
+    try {
+      conn.close();
+    } catch {}
+
+    return;
+  }
+
+
+  /*
+    Corrige identidade:
+    peerId vem da conexão,
+    nome vem do jogador que entrou.
+  */
+
+  const safePlayer = {
+
+    playerId:
+      String(
+        player.playerId ||
+        "player-" +
+        Math.random()
+          .toString(36)
+          .slice(2)
+      ),
+
+    peerId:
+      conn.peer,
+
+    name:
+      String(
+        player.name ||
+        "Jogador"
+      ).slice(0, 16),
+
+    isHost: false,
+
+    lastSeen: Date.now(),
+
+    connected: true
+  };
+
+
+  addOrUpdatePlayer(
+    safePlayer
+  );
+
+
+  sendToConnection(
+    conn,
+    {
+      type: "ROOM_STATE",
+      players:
+        serializePlayers(),
+      gameStarted
     }
   );
+
+
+  broadcastRoomState();
 }
 
-function sendRoomState() {
 
-  broadcast({
-    type:
-      "ROOM_STATE",
+function broadcastRoomState() {
+
+  if (!isHost) {
+    return;
+  }
+
+  const message = {
+
+    type: "ROOM_STATE",
 
     players:
-      roomPlayerList()
-  });
+      serializePlayers(),
 
-  renderPlayers();
+    gameStarted
+  };
+
+  broadcast(message);
+
+  updateRoomUI();
+}
+
+
+function updateRoomUI() {
+
+  const players =
+    Object.values(
+      roomPlayers
+    );
+
+  const count =
+    players.length;
+
+
+  playerCountElement.textContent =
+    `${count}/${MAX_PLAYERS}`;
+
+  gamePlayers.textContent =
+    `${count}/${MAX_PLAYERS}`;
+
+
+  playersElement.innerHTML = "";
+
+
+  const sorted =
+    players.sort(
+      (a, b) => {
+
+        if (
+          a.isHost &&
+          !b.isHost
+        ) {
+          return -1;
+        }
+
+        if (
+          !a.isHost &&
+          b.isHost
+        ) {
+          return 1;
+        }
+
+        return a.name.localeCompare(
+          b.name,
+          "pt-BR"
+        );
+      }
+    );
+
+
+  for (
+    const player of sorted
+  ) {
+
+    const item =
+      document.createElement(
+        "div"
+      );
+
+    item.className =
+      "player";
+
+
+    const avatar =
+      document.createElement(
+        "div"
+      );
+
+    avatar.className =
+      "player-avatar";
+
+    avatar.textContent =
+      player.name
+        .charAt(0)
+        .toUpperCase();
+
+
+    const info =
+      document.createElement(
+        "div"
+      );
+
+    info.className =
+      "player-info";
+
+
+    const name =
+      document.createElement(
+        "div"
+      );
+
+    name.className =
+      "player-name";
+
+    /*
+      IMPORTANTE:
+      usa o nome salvo naquele player.
+    */
+
+    name.textContent =
+      player.name;
+
+
+    const playerStatus =
+      document.createElement(
+        "div"
+      );
+
+    playerStatus.className =
+      "player-status";
+
+    if (
+      player.playerId ===
+      playerId
+    ) {
+
+      playerStatus.textContent =
+        "Você";
+
+    } else {
+
+      playerStatus.textContent =
+        "Conectado";
+    }
+
+
+    info.appendChild(name);
+    info.appendChild(playerStatus);
+
+
+    item.appendChild(avatar);
+    item.appendChild(info);
+
+
+    if (player.isHost) {
+
+      const host =
+        document.createElement(
+          "div"
+        );
+
+      host.className =
+        "player-host";
+
+      host.textContent =
+        "HOST";
+
+      item.appendChild(host);
+    }
+
+
+    playersElement.appendChild(
+      item
+    );
+  }
+
+
+  if (isHost) {
+
+    startButton.classList.remove(
+      "hidden"
+    );
+
+    startButton.disabled =
+      count < 1;
+
+  } else {
+
+    startButton.classList.add(
+      "hidden"
+    );
+  }
 }
 
 
@@ -979,31 +1727,24 @@ function startHeartbeat() {
     setInterval(
       () => {
 
-        if (
-          !peer ||
-          peer.destroyed
-        ) {
+        if (!joinedRoom) {
           return;
         }
 
-        if (!isHost) {
+        if (isHost) {
 
-          sendTo(
-            roomPeerId,
-            {
-              type:
-                "HEARTBEAT",
+          prunePlayers();
 
-              id:
-                peer.id
-            }
-          );
+        } else {
+
+          sendHeartbeat();
         }
 
       },
-      1800
+      HEARTBEAT_INTERVAL
     );
 }
+
 
 function stopHeartbeat() {
 
@@ -1017,82 +1758,304 @@ function stopHeartbeat() {
   }
 }
 
-function startPrune() {
 
-  if (!isHost) {
+function sendHeartbeat() {
+
+  const hostConnection =
+    findHostConnection();
+
+  if (
+    !hostConnection ||
+    !hostConnection.open
+  ) {
+
+    connectToHost();
+
     return;
   }
 
-  if (pruneTimer) {
-    clearInterval(
-      pruneTimer
-    );
+
+  sendToConnection(
+    hostConnection,
+    {
+      type: "HEARTBEAT",
+
+      player: {
+
+        playerId,
+        peerId: myPeerId,
+        name: username
+      }
+    }
+  );
+}
+
+
+function findHostConnection() {
+
+  for (
+    const [peerIdRemote, conn]
+    of dataConnections
+  ) {
+
+    if (
+      peerIdRemote ===
+      hostPeerId
+    ) {
+
+      return conn;
+    }
   }
 
-  pruneTimer =
-    setInterval(
-      () => {
+  return null;
+}
 
-        const now =
-          Date.now();
 
-        players.forEach(
-          (player, id) => {
+function prunePlayers() {
 
-            if (
-              id === peer.id
-            ) {
-              return;
-            }
+  const now =
+    Date.now();
 
-            if (
-              player.lastSeen &&
-              now -
-                player.lastSeen >
-                4500
-            ) {
+  let changed = false;
 
-              removePlayer(id);
 
-              sendRoomState();
-            }
-          }
+  for (
+    const id in roomPlayers
+  ) {
+
+    if (
+      id === playerId
+    ) {
+      continue;
+    }
+
+    const player =
+      roomPlayers[id];
+
+    if (
+      now -
+      (player.lastSeen || 0)
+      >
+      PLAYER_TIMEOUT
+    ) {
+
+      const peerIdRemote =
+        player.peerId;
+
+      delete roomPlayers[id];
+
+      if (peerIdRemote) {
+
+        const conn =
+          dataConnections.get(
+            peerIdRemote
+          );
+
+        if (conn) {
+
+          try {
+            conn.close();
+          } catch {}
+        }
+
+        removeVoiceConnection(
+          peerIdRemote
         );
+      }
 
-      },
-      1500
-    );
+      broadcast({
+        type: "PLAYER_LEFT",
+        playerId: id
+      });
+
+      changed = true;
+    }
+  }
+
+
+  if (changed) {
+    broadcastRoomState();
+  }
+
+  updateRoomUI();
 }
 
 
 /* =========================================================
-   MICROFONE
+   VOICE
 ========================================================= */
 
-async function getMicrophone() {
+micButton.addEventListener(
+  "click",
+  async () => {
+
+    if (!micEnabled) {
+
+      await enableMicrophone();
+
+    } else {
+
+      disableMicrophone();
+    }
+  }
+);
+
+
+gameVoiceButton.addEventListener(
+  "click",
+  async () => {
+
+    /*
+      OFF não fecha recebimento.
+      Apenas para de transmitir.
+    */
+
+    if (!gameVoiceEnabled) {
+
+      if (!localStream) {
+
+        const ok =
+          await enableMicrophone();
+
+        if (!ok) {
+          return;
+        }
+      }
+
+      gameVoiceEnabled = true;
+
+      setOutgoingTracksEnabled(
+        true
+      );
+
+      updateGameVoiceButton();
+
+      return;
+    }
+
+
+    gameVoiceEnabled = false;
+
+    setOutgoingTracksEnabled(
+      false
+    );
+
+    updateGameVoiceButton();
+  }
+);
+
+
+async function enableMicrophone() {
 
   if (localStream) {
-    return localStream;
+
+    micEnabled = true;
+
+    setOutgoingTracksEnabled(
+      !gameStarted ||
+      gameVoiceEnabled
+    );
+
+    updateVoiceUI();
+
+    establishVoiceConnections();
+
+    return true;
   }
 
-  localStream =
-    await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: 1,
-        sampleRate: 48000,
-        sampleSize: 16,
-        latency: 0
-      },
-      video: false
-    });
 
-  return localStream;
+  try {
+
+    localStream =
+      await navigator.mediaDevices
+        .getUserMedia({
+
+          audio: {
+
+            echoCancellation: true,
+
+            noiseSuppression: false,
+
+            autoGainControl: false,
+
+            channelCount: 1,
+
+            sampleRate: 48000,
+
+            sampleSize: 16,
+
+            latency: 0
+          },
+
+          video: false
+        });
+
+
+    micEnabled = true;
+
+    /*
+      Dentro da partida começa OFF.
+    */
+
+    if (gameStarted) {
+
+      gameVoiceEnabled = false;
+
+      setOutgoingTracksEnabled(
+        false
+      );
+
+    } else {
+
+      setOutgoingTracksEnabled(
+        true
+      );
+    }
+
+
+    updateVoiceUI();
+
+    establishVoiceConnections();
+
+    return true;
+
+  } catch (error) {
+
+    console.warn(
+      "Microfone:",
+      error
+    );
+
+    voiceStatus.textContent =
+      "Permissão do microfone negada.";
+
+    return false;
+  }
 }
 
-function setTracksEnabled(
+
+function disableMicrophone() {
+
+  micEnabled = false;
+
+  gameVoiceEnabled = false;
+
+  /*
+    Não fechamos as MediaConnections.
+    Apenas desligamos o envio.
+  */
+
+  setOutgoingTracksEnabled(
+    false
+  );
+
+  updateVoiceUI();
+
+  updateGameVoiceButton();
+}
+
+
+function setOutgoingTracksEnabled(
   enabled
 ) {
 
@@ -1100,31 +2063,19 @@ function setTracksEnabled(
     return;
   }
 
-  localStream
-    .getAudioTracks()
-    .forEach(
-      track => {
-        track.enabled =
-          enabled;
-      }
-    );
+  for (
+    const track of localStream.getAudioTracks()
+  ) {
+
+    track.enabled =
+      !!enabled;
+  }
 }
 
-function updateMicUI() {
 
-  if (micEnabled) {
+function updateVoiceUI() {
 
-    micButton.textContent =
-      "Desligar microfone";
-
-    micButton.classList.add(
-      "active"
-    );
-
-    voiceStatus.textContent =
-      "Microfone ligado";
-
-  } else {
+  if (!micEnabled) {
 
     micButton.textContent =
       "Ativar microfone";
@@ -1135,372 +2086,48 @@ function updateMicUI() {
 
     voiceStatus.textContent =
       "Microfone desligado";
+
+    return;
   }
-}
-
-micButton.addEventListener(
-  "click",
-  async () => {
-
-    if (micEnabled) {
-
-      micEnabled = false;
-
-      /*
-       * Só desativa a transmissão.
-       * As chamadas recebidas continuam.
-       */
-      setTracksEnabled(false);
-
-      updateMicUI();
-
-      return;
-    }
-
-    try {
-
-      await getMicrophone();
-
-      micEnabled = true;
-
-      setTracksEnabled(true);
-
-      updateMicUI();
-
-      /*
-       * Chamada imediatamente.
-       * Não espera DataConnection.
-       */
-      connectVoiceToEveryone();
-
-    } catch (_) {
-
-      voiceStatus.textContent =
-        "Não foi possível acessar o microfone.";
-    }
-  }
-);
 
 
-/* =========================================================
-   VOZ
-========================================================= */
+  micButton.textContent =
+    "Desativar microfone";
 
-function voicePeerIds() {
-
-  const ids = [];
-
-  players.forEach(
-    (player, id) => {
-
-      if (
-        id !== peer?.id &&
-        player.connected !== false
-      ) {
-        ids.push(id);
-      }
-    }
+  micButton.classList.add(
+    "active"
   );
+
 
   if (
-    !isHost &&
-    roomPeerId &&
-    !ids.includes(roomPeerId)
-  ) {
-    ids.push(roomPeerId);
-  }
-
-  return ids;
-}
-
-function connectVoiceToEveryone() {
-
-  if (
-    !peer ||
-    peer.destroyed ||
-    !localStream ||
-    !micEnabled
-  ) {
-    return;
-  }
-
-  voicePeerIds().forEach(
-    id => {
-      createVoiceCall(id);
-    }
-  );
-}
-
-function createVoiceCall(id) {
-
-  if (
-    !id ||
-    id === peer?.id ||
-    !localStream ||
-    !micEnabled
-  ) {
-    return;
-  }
-
-  const old =
-    voiceCalls.get(id);
-
-  if (old) {
-    try {
-      old.close();
-    } catch (_) {}
-  }
-
-  let call;
-
-  try {
-
-    call =
-      peer.call(
-        id,
-        localStream,
-        {
-          metadata: {
-            room: roomCode,
-            user: username
-          }
-        }
-      );
-
-  } catch (_) {
-    return;
-  }
-
-  if (!call) {
-    return;
-  }
-
-  voiceCalls.set(
-    id,
-    call
-  );
-
-  call.on(
-    "stream",
-    stream => {
-
-      attachRemoteAudio(
-        id,
-        stream
-      );
-    }
-  );
-
-  call.on(
-    "close",
-    () => {
-
-      if (
-        voiceCalls.get(id) ===
-        call
-      ) {
-        voiceCalls.delete(id);
-      }
-    }
-  );
-
-  call.on(
-    "error",
-    () => {
-
-      if (
-        voiceCalls.get(id) ===
-        call
-      ) {
-        voiceCalls.delete(id);
-      }
-    }
-  );
-}
-
-function answerVoiceCall(
-  call
-) {
-
-  if (!call) {
-    return;
-  }
-
-  const callerId =
-    call.peer;
-
-  try {
-
-    /*
-     * Sempre responde.
-     *
-     * Se o microfone estiver desligado,
-     * a pessoa continua recebendo áudio.
-     */
-    if (
-      micEnabled &&
-      localStream
-    ) {
-
-      call.answer(
-        localStream
-      );
-
-    } else {
-
-      call.answer();
-    }
-
-  } catch (_) {
-    return;
-  }
-
-  call.on(
-    "stream",
-    stream => {
-
-      attachRemoteAudio(
-        callerId,
-        stream
-      );
-    }
-  );
-
-  call.on(
-    "close",
-    () => {
-
-      removeRemoteAudio(
-        callerId
-      );
-    }
-  );
-
-  call.on(
-    "error",
-    () => {
-
-      removeRemoteAudio(
-        callerId
-      );
-    }
-  );
-}
-
-function attachRemoteAudio(
-  id,
-  stream
-) {
-
-  let audio =
-    remoteAudioElements.get(id);
-
-  if (!audio) {
-
-    audio =
-      document.createElement(
-        "audio"
-      );
-
-    audio.autoplay = true;
-    audio.playsInline = true;
-    audio.preload = "none";
-    audio.volume = 1;
-
-    audio.style.display =
-      "none";
-
-    remoteAudios.appendChild(
-      audio
-    );
-
-    remoteAudioElements.set(
-      id,
-      audio
-    );
-  }
-
-  /*
-   * Não usa AudioContext.
-   * Não cria ganho, compressor ou filtros.
-   * Vai direto do WebRTC para o áudio.
-   */
-  if (
-    audio.srcObject !==
-    stream
+    gameStarted &&
+    !gameVoiceEnabled
   ) {
 
-    audio.srcObject =
-      stream;
-  }
+    voiceStatus.textContent =
+      "Microfone preparado • voz da partida OFF";
 
-  const play =
-    audio.play();
+  } else {
 
-  if (play) {
-    play.catch(
-      () => {}
-    );
+    voiceStatus.textContent =
+      "Microfone ativo";
   }
 }
 
-function removeRemoteAudio(
-  id
-) {
 
-  const audio =
-    remoteAudioElements.get(id);
-
-  if (!audio) {
-    return;
-  }
-
-  try {
-    audio.pause();
-    audio.srcObject = null;
-    audio.remove();
-  } catch (_) {}
-
-  remoteAudioElements.delete(
-    id
-  );
-}
-
-function closeVoice(id) {
-
-  const call =
-    voiceCalls.get(id);
-
-  if (call) {
-
-    try {
-      call.close();
-    } catch (_) {}
-  }
-
-  voiceCalls.delete(id);
-
-  removeRemoteAudio(id);
-}
-
-
-/* =========================================================
-   VOZ DA PARTIDA
-========================================================= */
-
-function updateGameVoiceUI() {
+function updateGameVoiceButton() {
 
   if (gameVoiceEnabled) {
 
     gameVoiceButton.textContent =
       "Voz: ON";
 
-    gameVoiceButton.classList.add(
-      "active"
-    );
-
     gameVoiceButton.classList.remove(
       "off"
+    );
+
+    gameVoiceButton.classList.add(
+      "active"
     );
 
   } else {
@@ -1518,58 +2145,448 @@ function updateGameVoiceUI() {
   }
 }
 
-gameVoiceButton.addEventListener(
-  "click",
-  async () => {
 
-    if (gameVoiceEnabled) {
+/* =========================================================
+   VOICE CONNECTIONS
+========================================================= */
 
-      gameVoiceEnabled =
-        false;
+function voicePeerIds() {
 
-      /*
-       * Só para de transmitir.
-       * Não fecha chamadas.
-       */
-      setTracksEnabled(false);
+  return Object.values(
+    roomPlayers
+  )
+    .filter(
+      (player) =>
+        player.playerId !==
+        playerId &&
+        player.peerId
+    )
+    .map(
+      (player) =>
+        player.peerId
+    );
+}
 
-      updateGameVoiceUI();
 
-      return;
+function establishVoiceConnections() {
+
+  if (
+    !peer ||
+    !localStream
+  ) {
+    return;
+  }
+
+
+  /*
+    Apenas o menor peerId inicia a chamada.
+    Isso evita A chamar B e B chamar A ao mesmo tempo.
+  */
+
+  const others =
+    voicePeerIds();
+
+
+  for (
+    const remotePeerId of others
+  ) {
+
+    if (
+      remotePeerId ===
+      myPeerId
+    ) {
+      continue;
     }
+
+
+    const shouldInitiate =
+      String(myPeerId)
+        .localeCompare(
+          String(remotePeerId)
+        ) < 0;
+
+
+    if (!shouldInitiate) {
+      continue;
+    }
+
+
+    const existing =
+      voiceCalls.get(
+        remotePeerId
+      );
+
+
+    if (
+      existing &&
+      !existing.destroyed
+    ) {
+      continue;
+    }
+
+
+    createVoiceCall(
+      remotePeerId
+    );
+  }
+}
+
+
+function createVoiceCall(
+  remotePeerId
+) {
+
+  if (
+    !peer ||
+    !localStream ||
+    !remotePeerId
+  ) {
+    return;
+  }
+
+
+  if (
+    remotePeerId ===
+    myPeerId
+  ) {
+    return;
+  }
+
+
+  const old =
+    voiceCalls.get(
+      remotePeerId
+    );
+
+
+  if (
+    old &&
+    !old.destroyed
+  ) {
+
+    return;
+  }
+
+
+  try {
+
+    const call =
+      peer.call(
+        remotePeerId,
+        localStream,
+        {
+          metadata: {
+            playerId,
+            name: username
+          }
+        }
+      );
+
+
+    voiceCalls.set(
+      remotePeerId,
+      call
+    );
+
+
+    setupVoiceCall(
+      call,
+      remotePeerId,
+      true
+    );
+
+  } catch {}
+}
+
+
+function handleIncomingVoiceCall(
+  call
+) {
+
+  if (!call) {
+    return;
+  }
+
+
+  const remotePeerId =
+    call.peer;
+
+
+  /*
+    Se já temos uma chamada recebida
+    daquele peer, fechamos a antiga.
+  */
+
+  const old =
+    incomingVoiceCalls.get(
+      remotePeerId
+    );
+
+
+  if (
+    old &&
+    old !== call
+  ) {
 
     try {
-
-      await getMicrophone();
-
-      gameVoiceEnabled =
-        true;
-
-      micEnabled = true;
-
-      setTracksEnabled(true);
-
-      updateMicUI();
-      updateGameVoiceUI();
-
-      /*
-       * Reativa as chamadas imediatamente.
-       */
-      connectVoiceToEveryone();
-
-    } catch (_) {
-
-      gameVoiceEnabled =
-        false;
-
-      updateGameVoiceUI();
-    }
+      old.close();
+    } catch {}
   }
-);
+
+
+  incomingVoiceCalls.set(
+    remotePeerId,
+    call
+  );
+
+
+  try {
+
+    /*
+      Mesmo com voz OFF, respondemos sem
+      fechar a chamada. Isso permite ouvir.
+    */
+
+    if (localStream) {
+
+      call.answer(
+        localStream
+      );
+
+    } else {
+
+      call.answer();
+    }
+
+  } catch {
+
+    try {
+      call.close();
+    } catch {}
+
+    return;
+  }
+
+
+  setupVoiceCall(
+    call,
+    remotePeerId,
+    false
+  );
+}
+
+
+function setupVoiceCall(
+  call,
+  remotePeerId,
+  outgoing
+) {
+
+  if (!call) {
+    return;
+  }
+
+
+  call.on(
+    "stream",
+    (stream) => {
+
+      attachRemoteVoice(
+        remotePeerId,
+        stream
+      );
+    }
+  );
+
+
+  call.on(
+    "close",
+    () => {
+
+      if (
+        voiceCalls.get(
+          remotePeerId
+        ) === call
+      ) {
+
+        voiceCalls.delete(
+          remotePeerId
+        );
+      }
+
+
+      if (
+        incomingVoiceCalls.get(
+          remotePeerId
+        ) === call
+      ) {
+
+        incomingVoiceCalls.delete(
+          remotePeerId
+        );
+      }
+    }
+  );
+
+
+  call.on(
+    "error",
+    () => {
+
+      if (
+        voiceCalls.get(
+          remotePeerId
+        ) === call
+      ) {
+
+        voiceCalls.delete(
+          remotePeerId
+        );
+      }
+
+
+      if (
+        incomingVoiceCalls.get(
+          remotePeerId
+        ) === call
+      ) {
+
+        incomingVoiceCalls.delete(
+          remotePeerId
+        );
+      }
+    }
+  );
+}
+
+
+function attachRemoteVoice(
+  remotePeerId,
+  stream
+) {
+
+  let audio =
+    document.querySelector(
+      `audio[data-peer="${CSS.escape(remotePeerId)}"]`
+    );
+
+
+  if (!audio) {
+
+    audio =
+      document.createElement(
+        "audio"
+      );
+
+    audio.dataset.peer =
+      remotePeerId;
+
+    audio.autoplay = true;
+    audio.playsInline = true;
+
+    audio.setAttribute(
+      "playsinline",
+      ""
+    );
+
+    audio.volume = 1;
+
+    remoteAudios.appendChild(
+      audio
+    );
+  }
+
+
+  if (
+    audio.srcObject !==
+    stream
+  ) {
+
+    audio.srcObject =
+      stream;
+  }
+
+
+  /*
+    Tenta tocar imediatamente.
+  */
+
+  const playPromise =
+    audio.play();
+
+
+  if (
+    playPromise &&
+    typeof playPromise.catch ===
+      "function"
+  ) {
+
+    playPromise.catch(
+      () => {}
+    );
+  }
+}
+
+
+function removeVoiceConnection(
+  remotePeerId
+) {
+
+  const outgoing =
+    voiceCalls.get(
+      remotePeerId
+    );
+
+  if (outgoing) {
+
+    try {
+      outgoing.close();
+    } catch {}
+  }
+
+
+  const incoming =
+    incomingVoiceCalls.get(
+      remotePeerId
+    );
+
+  if (incoming) {
+
+    try {
+      incoming.close();
+    } catch {}
+  }
+
+
+  voiceCalls.delete(
+    remotePeerId
+  );
+
+  incomingVoiceCalls.delete(
+    remotePeerId
+  );
+
+
+  const audio =
+    document.querySelector(
+      `audio[data-peer="${CSS.escape(remotePeerId)}"]`
+    );
+
+  if (audio) {
+
+    try {
+      audio.pause();
+    } catch {}
+
+    audio.srcObject = null;
+
+    audio.remove();
+  }
+}
 
 
 /* =========================================================
-   COMEÇAR PARTIDA
+   START GAME
 ========================================================= */
 
 startButton.addEventListener(
@@ -1580,126 +2597,158 @@ startButton.addEventListener(
       return;
     }
 
-    if (gameStarted) {
+    const count =
+      Object.keys(
+        roomPlayers
+      ).length;
+
+    if (count < 1) {
       return;
     }
 
-    if (players.size < 1) {
-      return;
-    }
-
-    gameStarted = true;
-    currentRound = 1;
-
-    broadcast({
-      type:
-        "START_GAME",
-
-      round:
-        currentRound
-    });
-
-    startGame(
-      currentRound
-    );
+    startGameHost();
   }
 );
 
-function startGame(
-  round
+
+function startGameHost() {
+
+  gameStarted = true;
+
+  currentRound = 1;
+
+  gameVoiceEnabled = false;
+
+  /*
+    Não ativa a voz automaticamente.
+  */
+
+  if (localStream) {
+
+    setOutgoingTracksEnabled(
+      false
+    );
+  }
+
+  updateGameVoiceButton();
+  updateVoiceUI();
+
+  clearRoundTimers();
+
+  const message = {
+
+    type: "GAME_START",
+
+    round: 1,
+
+    totalRounds:
+      TOTAL_ROUNDS,
+
+    players:
+      serializePlayers()
+  };
+
+
+  broadcast(message);
+
+  applyGameStart(
+    message
+  );
+}
+
+
+function applyGameStart(
+  message
 ) {
 
   gameStarted = true;
 
   currentRound =
-    round || 1;
+    Number(
+      message.round || 1
+    );
 
-  /*
-   * A partida não mexe no estado da voz
-   * até uma etapa que realmente precise.
-   *
-   * Portanto vocês conseguem conversar
-   * normalmente na partida.
-   */
-  showScreen(gameScreen);
+  gameVoiceEnabled = false;
 
-  gameVoiceEnabled =
-    micEnabled;
+  if (localStream) {
 
-  updateGameVoiceUI();
+    setOutgoingTracksEnabled(
+      false
+    );
+  }
+
+  updateGameVoiceButton();
+  updateVoiceUI();
+
+  showGame();
+
+  updateRoundUI();
+
+  beginRoundCountdown();
+}
+
+
+/* =========================================================
+   ROUND UI
+========================================================= */
+
+function updateRoundUI() {
 
   roundText.textContent =
     `Rodada ${currentRound}`;
 
   gamePlayers.textContent =
-    `${players.size}/5`;
-
-  startCountdown(
-    currentRound
-  );
+    `${Object.keys(roomPlayers).length}/${MAX_PLAYERS}`;
 }
 
 
 /* =========================================================
-   CONTAGEM
+   COUNTDOWN
 ========================================================= */
 
-function startCountdown(
-  round
-) {
+function beginRoundCountdown() {
 
-  hideGameScreens();
+  clearRoundTimers();
+
+  hideAllGameScreens();
 
   countdownScreen.classList.remove(
     "hidden"
   );
 
-  roundText.textContent =
-    `Rodada ${round}`;
-
-  let count = 5;
+  let number = 5;
 
   countdownNumber.textContent =
-    count;
+    number;
 
-  clearInterval(
-    countdownTimer
-  );
+  countdownHint.textContent =
+    "Prepare-se";
 
-  countdownTimer =
+
+  roundTimer =
     setInterval(
       () => {
 
-        count--;
+        number--;
 
-        countdownNumber.textContent =
-          count;
-
-        if (count <= 0) {
+        if (number <= 0) {
 
           clearInterval(
-            countdownTimer
+            roundTimer
           );
 
-          countdownTimer =
-            null;
+          roundTimer = null;
 
           if (isHost) {
 
-            broadcast({
-              type:
-                "REFERENCE"
-            });
-
-            startReference();
-
-          } else {
-
-            /*
-             * Convidados recebem REFERENCE.
-             */
+            startReferencePhase();
           }
+
+          return;
         }
+
+        countdownNumber.textContent =
+          number;
 
       },
       1000
@@ -1708,191 +2757,478 @@ function startCountdown(
 
 
 /* =========================================================
-   REFERÊNCIA
+   REFERENCE
 ========================================================= */
 
-function startReference() {
+function startReferencePhase() {
 
-  hideGameScreens();
+  const reference =
+    createReference(
+      currentRound
+    );
+
+
+  currentReferenceData =
+    reference;
+
+
+  const message = {
+
+    type: "REFERENCE",
+
+    round:
+      currentRound,
+
+    reference
+  };
+
+
+  broadcast(message);
+
+  applyReference(
+    message
+  );
+}
+
+
+function applyReference(
+  message
+) {
+
+  if (
+    Number(message.round) !==
+    Number(currentRound)
+  ) {
+    return;
+  }
+
+
+  currentReferenceData =
+    message.reference;
+
+  referencePlayed = false;
+
+  hideAllGameScreens();
 
   referenceScreen.classList.remove(
     "hidden"
   );
 
-  referenceStatus.textContent =
-    "Ouça com atenção.";
+
+  referenceType.textContent =
+    String(
+      currentReferenceData.type
+    ).toUpperCase();
+
+
+  referenceDescription.textContent =
+    currentReferenceData.description;
+
+
+  referenceWait.textContent =
+    "Ouça o som antes de gravar.";
+
 
   /*
-   * Pequena pausa para sincronizar
-   * a interface de todos.
-   */
-  setTimeout(
-    () => {
-
-      playReferenceSound();
-
-    },
-    800
-  );
+    Reproduz automaticamente uma vez.
+    Depois deixa botão para ouvir novamente.
+  */
 
   setTimeout(
     () => {
 
-      if (isHost) {
-
-        broadcast({
-          type:
-            "RECORD_START"
-        });
-
-        startRecording();
-      }
+      playReference();
 
     },
-    5500
+    700
   );
-}
-
-referenceButton.addEventListener(
-  "click",
-  () => {
-    playReferenceSound();
-  }
-);
-
-function playReferenceSound() {
-
-  try {
-
-    if (
-      referenceAudioContext
-    ) {
-      referenceAudioContext.close();
-    }
-
-    const AudioCtx =
-      window.AudioContext ||
-      window.webkitAudioContext;
-
-    referenceAudioContext =
-      new AudioCtx();
-
-    const ctx =
-      referenceAudioContext;
-
-    const oscillator =
-      ctx.createOscillator();
-
-    const gain =
-      ctx.createGain();
-
-    oscillator.type =
-      "sine";
-
-    oscillator.frequency.value =
-      440;
-
-    gain.gain.value =
-      0.001;
-
-    oscillator.connect(gain);
-    gain.connect(
-      ctx.destination
-    );
-
-    const now =
-      ctx.currentTime;
-
-    oscillator.start(now);
-
-    gain.gain.exponentialRampToValueAtTime(
-      0.3,
-      now + 0.04
-    );
-
-    gain.gain.exponentialRampToValueAtTime(
-      0.001,
-      now + 0.35
-    );
-
-    oscillator.stop(
-      now + 0.4
-    );
-
-    referenceStatus.textContent =
-      "Som reproduzido. Prepare sua imitação.";
-
-  } catch (_) {}
 }
 
 
 /* =========================================================
-   GRAVAÇÃO
+   REFERENCE GENERATOR
 ========================================================= */
 
-async function startRecording() {
+function createReference(
+  round
+) {
 
-  hideGameScreens();
+  const types = [
+    {
+      type: "Animal",
+      description:
+        "Um som curto com dois ataques."
+    },
+    {
+      type: "Máquina",
+      description:
+        "Um som mecânico em sequência."
+    },
+    {
+      type: "Voz",
+      description:
+        "Uma sequência de tons para imitar."
+    },
+    {
+      type: "Ruído",
+      description:
+        "Um som com ataques rápidos."
+    }
+  ];
+
+
+  const selected =
+    types[
+      (round - 1) %
+      types.length
+    ];
+
+
+  /*
+    Sequência de frequências.
+    Não depende de arquivo externo.
+  */
+
+  const sequences = [
+    [330, 440, 330],
+    [180, 240, 180, 260],
+    [392, 494, 392],
+    [250, 500, 300, 600]
+  ];
+
+
+  return {
+
+    type:
+      selected.type,
+
+    description:
+      selected.description,
+
+    frequencies:
+      sequences[
+        (round - 1) %
+        sequences.length
+      ],
+
+    toneDuration:
+      0.26,
+
+    gap:
+      0.11
+  };
+}
+
+
+async function playReference() {
+
+  if (
+    !currentReferenceData
+  ) {
+    return;
+  }
+
+
+  referencePlayed = true;
+
+  const data =
+    currentReferenceData;
+
+
+  const AudioContext =
+    window.AudioContext ||
+    window.webkitAudioContext;
+
+
+  if (!AudioContext) {
+    return;
+  }
+
+
+  const ctx =
+    new AudioContext();
+
+
+  try {
+
+    if (
+      ctx.state ===
+      "suspended"
+    ) {
+
+      await ctx.resume();
+    }
+
+
+    let time =
+      ctx.currentTime +
+      0.05;
+
+
+    for (
+      const frequency
+      of data.frequencies
+    ) {
+
+      const osc =
+        ctx.createOscillator();
+
+      const gain =
+        ctx.createGain();
+
+
+      osc.type =
+        "sine";
+
+      osc.frequency.value =
+        frequency;
+
+
+      gain.gain.setValueAtTime(
+        0.0001,
+        time
+      );
+
+      gain.gain.exponentialRampToValueAtTime(
+        0.32,
+        time + 0.025
+      );
+
+      gain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        time +
+          data.toneDuration
+      );
+
+
+      osc.connect(
+        gain
+      );
+
+      gain.connect(
+        ctx.destination
+      );
+
+
+      osc.start(
+        time
+      );
+
+      osc.stop(
+        time +
+          data.toneDuration +
+          0.02
+      );
+
+
+      time +=
+        data.toneDuration +
+        data.gap;
+    }
+
+
+    setTimeout(
+      () => {
+
+        try {
+          ctx.close();
+        } catch {}
+
+      },
+      2200
+    );
+
+
+    referenceWait.textContent =
+      "Quando terminar, a gravação começa.";
+
+  } catch {
+
+    try {
+      ctx.close();
+    } catch {}
+  }
+
+
+  if (isHost) {
+
+    clearRoundTimers();
+
+    roundTimer =
+      setTimeout(
+        () => {
+
+          startRecordingPhase();
+
+        },
+        REFERENCE_DELAY
+      );
+  }
+}
+
+
+referenceButton.addEventListener(
+  "click",
+  playReference
+);
+
+
+/* =========================================================
+   RECORD START
+========================================================= */
+
+function startRecordingPhase() {
+
+  const message = {
+
+    type: "RECORD_START",
+
+    round:
+      currentRound,
+
+    duration:
+      RECORD_SECONDS
+  };
+
+
+  broadcast(message);
+
+  applyRecordStart(
+    message
+  );
+}
+
+
+async function applyRecordStart(
+  message
+) {
+
+  if (
+    Number(message.round) !==
+    Number(currentRound)
+  ) {
+    return;
+  }
+
+
+  recordingStarted = true;
+
+  currentRecordingBlob = null;
+
+  hideAllGameScreens();
 
   recordScreen.classList.remove(
     "hidden"
   );
 
+
   recordStatus.textContent =
-    "Prepare-se...";
+    "Preparando microfone...";
+
 
   /*
-   * Durante a gravação ninguém transmite
-   * voz pelo chat.
-   */
-  gameVoiceEnabled =
-    false;
+    Durante a gravação ninguém transmite
+    voz do chat.
+  */
 
-  setTracksEnabled(false);
+  gameVoiceEnabled = false;
 
-  updateGameVoiceUI();
+  if (localStream) {
 
-  try {
+    setOutgoingTracksEnabled(
+      false
+    );
+  }
 
-    await getMicrophone();
+  updateGameVoiceButton();
 
-  } catch (_) {}
 
-  await sleep(900);
+  const ready =
+    await prepareRecordingMicrophone();
 
-  beginRecorder();
 
-  let seconds = 7;
+  if (!ready) {
 
-  recordTimerElement.textContent =
+    recordStatus.textContent =
+      "Microfone não disponível.";
+
+  } else {
+
+    recordStatus.textContent =
+      "Grave agora.";
+  }
+
+
+  runRecordingTimer(
+    Number(
+      message.duration ||
+      RECORD_SECONDS
+    )
+  );
+}
+
+
+async function prepareRecordingMicrophone() {
+
+  if (!localStream) {
+
+    const ok =
+      await enableMicrophone();
+
+    if (!ok) {
+      return false;
+    }
+  }
+
+
+  /*
+    A gravação usa o stream local.
+    Voz de chat permanece desligada.
+  */
+
+  setOutgoingTracksEnabled(
+    false
+  );
+
+  return true;
+}
+
+
+/* =========================================================
+   RECORD TIMER
+========================================================= */
+
+function runRecordingTimer(
+  seconds
+) {
+
+  clearRecordTimer();
+
+  let remaining =
     seconds;
 
-  recordStatus.textContent =
-    "Gravando...";
+  recordTimerElement.textContent =
+    remaining;
 
-  clearInterval(
-    recordTimer
-  );
 
   recordTimer =
     setInterval(
       () => {
 
-        seconds--;
+        remaining--;
 
         recordTimerElement.textContent =
-          seconds;
-
-        if (seconds <= 0) {
-
-          clearInterval(
-            recordTimer
+          Math.max(
+            remaining,
+            0
           );
 
-          recordTimer =
-            null;
 
-          stopRecorder();
+        if (remaining <= 0) {
+
+          clearRecordTimer();
+
+          stopRecording();
         }
 
       },
@@ -1900,36 +3236,44 @@ async function startRecording() {
     );
 }
 
-function beginRecorder() {
 
-  if (!localStream) {
-    return;
-  }
+function clearRecordTimer() {
 
-  recordedChunks = [];
+  if (recordTimer) {
 
-  if (recordedUrl) {
-
-    URL.revokeObjectURL(
-      recordedUrl
+    clearInterval(
+      recordTimer
     );
 
-    recordedUrl = null;
+    recordTimer = null;
+  }
+}
+
+
+/* =========================================================
+   START RECORDING
+========================================================= */
+
+async function startRecording() {
+
+  if (!localStream) {
+
+    const ok =
+      await prepareRecordingMicrophone();
+
+    if (!ok) {
+      return false;
+    }
   }
 
-  recordedBlob = null;
 
-  const tracks =
-    localStream.getAudioTracks();
+  recordingChunks = [];
 
-  if (!tracks.length) {
-    return;
-  }
 
-  const stream =
-    new MediaStream(tracks);
+  let options = {
+    audioBitsPerSecond: 64000
+  };
 
-  let options = {};
 
   if (
     MediaRecorder.isTypeSupported(
@@ -1939,93 +3283,1641 @@ function beginRecorder() {
 
     options.mimeType =
       "audio/webm;codecs=opus";
+
+  } else if (
+    MediaRecorder.isTypeSupported(
+      "audio/webm"
+    )
+  ) {
+
+    options.mimeType =
+      "audio/webm";
+
+  } else if (
+    MediaRecorder.isTypeSupported(
+      "audio/ogg;codecs=opus"
+    )
+  ) {
+
+    options.mimeType =
+      "audio/ogg;codecs=opus";
   }
+
 
   try {
 
-    mediaRecorder =
+    recorder =
       new MediaRecorder(
-        stream,
+        localStream,
         options
       );
 
-  } catch (_) {
+  } catch {
 
-    mediaRecorder =
+    recorder =
       new MediaRecorder(
-        stream
+        localStream
       );
   }
 
-  mediaRecorder.ondataavailable =
-    event => {
+
+  recorder.ondataavailable =
+    (event) => {
 
       if (
         event.data &&
-        event.data.size
+        event.data.size > 0
       ) {
 
-        recordedChunks.push(
+        recordingChunks.push(
           event.data
         );
       }
     };
 
-  mediaRecorder.onstop =
+
+  recorder.onstop =
     () => {
 
-      recordedBlob =
+      const mime =
+        recorder.mimeType ||
+        "audio/webm";
+
+
+      currentRecordingBlob =
         new Blob(
-          recordedChunks,
+          recordingChunks,
           {
-            type:
-              mediaRecorder.mimeType ||
-              "audio/webm"
+            type: mime
           }
         );
 
-      recordedUrl =
-        URL.createObjectURL(
-          recordedBlob
-        );
 
-      recordStatus.textContent =
-        "Gravação concluída.";
-
-      if (isHost) {
-
-        setTimeout(
-          () => {
-
-            broadcast({
-              type:
-                "PLAYBACK_START"
-            });
-
-            startPlayback();
-
-          },
-          1000
-        );
-      }
+      sendCurrentRecording();
     };
 
-  try {
-    mediaRecorder.start();
-  } catch (_) {}
+
+  recorder.start(
+    150
+  );
+
+
+  return true;
 }
 
-function stopRecorder() {
+
+/* =========================================================
+   STOP RECORDING
+========================================================= */
+
+function stopRecording() {
+
+  clearRecordTimer();
+
 
   if (
-    mediaRecorder &&
-    mediaRecorder.state !==
-      "inactive"
+    recorder &&
+    recorder.state !==
+    "inactive"
   ) {
 
     try {
-      mediaRecorder.stop();
-    } catch (_) {}
+      recorder.stop();
+    } catch {}
+  }
+
+
+  recordStatus.textContent =
+    "Gravação concluída.";
+
+  hideAllGameScreens();
+
+  uploadScreen.classList.remove(
+    "hidden"
+  );
+
+  uploadProgressBar.style.width =
+    "0%";
+
+  uploadProgressText.textContent =
+    "0%";
+
+
+  /*
+    Impede voz de continuar durante
+    a transferência.
+  */
+
+  gameVoiceEnabled = false;
+
+  if (localStream) {
+
+    setOutgoingTracksEnabled(
+      false
+    );
+  }
+
+  updateGameVoiceButton();
+}
+
+
+/* =========================================================
+   SEND RECORDING
+========================================================= */
+
+async function sendCurrentRecording() {
+
+  if (!currentRecordingBlob) {
+    return;
+  }
+
+
+  const blob =
+    currentRecordingBlob;
+
+
+  const arrayBuffer =
+    await blob.arrayBuffer();
+
+
+  const totalBytes =
+    arrayBuffer.byteLength;
+
+
+  const totalChunks =
+    Math.ceil(
+      totalBytes /
+      CHUNK_SIZE
+    );
+
+
+  /*
+    Salva imediatamente a gravação local.
+  */
+
+  saveReceivedRecording(
+    currentRound,
+    playerId,
+    username,
+    blob
+  );
+
+
+  /*
+    HOST:
+    ele já possui o áudio.
+    Só precisa esperar os demais.
+  */
+
+  if (isHost) {
+
+    updateUploadProgress(
+      100
+    );
+
+    registerLocalRecordingComplete();
+
+    return;
+  }
+
+
+  const hostConnection =
+    findHostConnection();
+
+
+  if (
+    !hostConnection ||
+    !hostConnection.open
+  ) {
+
+    uploadProgressText.textContent =
+      "Reconectando...";
+
+
+    setTimeout(
+      () => {
+
+        sendCurrentRecording();
+
+      },
+      500
+    );
+
+    return;
+  }
+
+
+  sendToConnection(
+    hostConnection,
+    {
+      type: "RECORD_META",
+
+      round:
+        currentRound,
+
+      playerId,
+
+      name:
+        username,
+
+      mimeType:
+        blob.type ||
+        "audio/webm",
+
+      totalChunks,
+
+      totalBytes
+    }
+  );
+
+
+  for (
+    let index = 0;
+    index < totalChunks;
+    index++
+  ) {
+
+    const start =
+      index *
+      CHUNK_SIZE;
+
+    const end =
+      Math.min(
+        start +
+        CHUNK_SIZE,
+        totalBytes
+      );
+
+
+    const chunk =
+      arrayBuffer.slice(
+        start,
+        end
+      );
+
+
+    let sent = false;
+
+
+    /*
+      Pequena espera se o DataChannel
+      estiver momentaneamente cheio.
+    */
+
+    while (!sent) {
+
+      sent =
+        sendToConnection(
+          hostConnection,
+          {
+            type:
+              "RECORD_CHUNK",
+
+            round:
+              currentRound,
+
+            playerId,
+
+            index,
+
+            totalChunks,
+
+            chunk
+          }
+        );
+
+
+      if (!sent) {
+
+        await sleep(
+          30
+        );
+      }
+    }
+
+
+    const progress =
+      Math.round(
+        ((index + 1) /
+          totalChunks) *
+        100
+      );
+
+
+    updateUploadProgress(
+      progress
+    );
+
+
+    /*
+      Evita lotar o DataChannel.
+    */
+
+    if (
+      hostConnection.dataChannel &&
+      hostConnection.dataChannel.bufferedAmount >
+        512 * 1024
+    ) {
+
+      await waitForDataChannelDrain(
+        hostConnection
+      );
+    }
+  }
+
+
+  sendToConnection(
+    hostConnection,
+    {
+      type:
+        "RECORD_COMPLETE",
+
+      round:
+        currentRound,
+
+      playerId,
+
+      name:
+        username,
+
+      mimeType:
+        blob.type ||
+        "audio/webm",
+
+      totalChunks,
+
+      totalBytes
+    }
+  );
+
+
+  updateUploadProgress(
+    100
+  );
+}
+
+
+function updateUploadProgress(
+  percent
+) {
+
+  const value =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        percent
+      )
+    );
+
+
+  uploadProgressBar.style.width =
+    value + "%";
+
+  uploadProgressText.textContent =
+    `${value}%`;
+}
+
+
+function waitForDataChannelDrain(
+  conn
+) {
+
+  return new Promise(
+    (resolve) => {
+
+      const channel =
+        conn.dataChannel;
+
+      if (!channel) {
+
+        resolve();
+
+        return;
+      }
+
+
+      const check =
+        () => {
+
+          if (
+            channel.bufferedAmount <=
+            256 * 1024
+          ) {
+
+            resolve();
+
+          } else {
+
+            setTimeout(
+              check,
+              25
+            );
+          }
+        };
+
+
+      check();
+    }
+  );
+}
+
+
+/* =========================================================
+   HOST RECEBE META
+========================================================= */
+
+function receiveRecordMeta(
+  message
+) {
+
+  if (!isHost) {
+    return;
+  }
+
+
+  if (
+    Number(message.round) !==
+    Number(currentRound)
+  ) {
+    return;
+  }
+
+
+  if (
+    !message.playerId
+  ) {
+    return;
+  }
+
+
+  if (
+    !transferBuffers[
+      currentRound
+    ]
+  ) {
+
+    transferBuffers[
+      currentRound
+    ] = {};
+  }
+
+
+  transferBuffers[
+    currentRound
+  ][
+    message.playerId
+  ] = {
+
+    name:
+      getPlayerName(
+        message.playerId,
+        message.name
+      ),
+
+    mimeType:
+      message.mimeType ||
+      "audio/webm",
+
+    totalChunks:
+      Number(
+        message.totalChunks ||
+        0
+      ),
+
+    chunks:
+      new Array(
+        Number(
+          message.totalChunks ||
+          0
+        )
+      ),
+
+    received:
+      0,
+
+    totalBytes:
+      Number(
+        message.totalBytes ||
+        0
+      ),
+
+    complete:
+      false
+  };
+}
+
+
+/* =========================================================
+   HOST RECEBE CHUNK
+========================================================= */
+
+function receiveRecordChunk(
+  message
+) {
+
+  if (!isHost) {
+    return;
+  }
+
+
+  if (
+    Number(message.round) !==
+    Number(currentRound)
+  ) {
+    return;
+  }
+
+
+  const roundBuffers =
+    transferBuffers[
+      currentRound
+    ];
+
+
+  if (!roundBuffers) {
+    return;
+  }
+
+
+  const buffer =
+    roundBuffers[
+      message.playerId
+    ];
+
+
+  if (!buffer) {
+    return;
+  }
+
+
+  const index =
+    Number(
+      message.index
+    );
+
+
+  if (
+    index < 0 ||
+    index >=
+    buffer.totalChunks
+  ) {
+    return;
+  }
+
+
+  if (
+    buffer.chunks[index]
+  ) {
+    return;
+  }
+
+
+  buffer.chunks[index] =
+    message.chunk;
+
+
+  buffer.received++;
+
+
+  /*
+    Host recebeu uma parte.
+    Distribui para os outros jogadores.
+  */
+
+  broadcast(
+    message
+  );
+
+
+  const progress =
+    buffer.totalChunks
+      ? Math.round(
+          (buffer.received /
+            buffer.totalChunks) *
+          100
+        )
+      : 0;
+
+
+  /*
+    Não precisamos mostrar o progresso
+    de outro jogador na tela.
+  */
+
+  if (
+    buffer.received >=
+    buffer.totalChunks
+  ) {
+
+    finalizeHostTransfer(
+      message.playerId
+    );
+  }
+}
+
+
+/* =========================================================
+   HOST RECEBE COMPLETE
+========================================================= */
+
+function receiveRecordComplete(
+  message
+) {
+
+  if (!isHost) {
+    return;
+  }
+
+
+  if (
+    Number(message.round) !==
+    Number(currentRound)
+  ) {
+    return;
+  }
+
+
+  const player =
+    getPlayerById(
+      message.playerId
+    );
+
+
+  if (
+    player &&
+    player.name !==
+    message.name
+  ) {
+
+    /*
+      Mantém o nome oficial da sala.
+    */
+  }
+
+
+  const roundBuffers =
+    transferBuffers[
+      currentRound
+    ];
+
+
+  const buffer =
+    roundBuffers &&
+    roundBuffers[
+      message.playerId
+    ];
+
+
+  if (!buffer) {
+    return;
+  }
+
+
+  buffer.complete = true;
+
+
+  if (
+    buffer.received >=
+    buffer.totalChunks
+  ) {
+
+    finalizeHostTransfer(
+      message.playerId
+    );
+  }
+}
+
+
+/* =========================================================
+   FINALIZA TRANSFERÊNCIA NO HOST
+========================================================= */
+
+function finalizeHostTransfer(
+  targetPlayerId
+) {
+
+  if (!isHost) {
+    return;
+  }
+
+
+  const roundBuffers =
+    transferBuffers[
+      currentRound
+    ];
+
+
+  if (!roundBuffers) {
+    return;
+  }
+
+
+  const buffer =
+    roundBuffers[
+      targetPlayerId
+    ];
+
+
+  if (
+    !buffer ||
+    buffer.finalized
+  ) {
+    return;
+  }
+
+
+  if (
+    buffer.received <
+    buffer.totalChunks
+  ) {
+    return;
+  }
+
+
+  buffer.finalized =
+    true;
+
+
+  const blob =
+    chunksToBlob(
+      buffer.chunks,
+      buffer.mimeType
+    );
+
+
+  const name =
+    getPlayerName(
+      targetPlayerId,
+      buffer.name
+    );
+
+
+  saveReceivedRecording(
+    currentRound,
+    targetPlayerId,
+    name,
+    blob
+  );
+
+
+  /*
+    Host avisa todos que essa gravação
+    terminou.
+  */
+
+  broadcast({
+    type:
+      "RECORD_COMPLETE",
+
+    round:
+      currentRound,
+
+    playerId:
+      targetPlayerId,
+
+    name,
+
+    mimeType:
+      buffer.mimeType,
+
+    totalChunks:
+      buffer.totalChunks,
+
+    totalBytes:
+      buffer.totalBytes
+  });
+
+
+  checkAllRecordingsReady();
+}
+
+
+/* =========================================================
+   LOCAL HOST RECORD
+========================================================= */
+
+function registerLocalRecordingComplete() {
+
+  saveReceivedRecording(
+    currentRound,
+    playerId,
+    username,
+    currentRecordingBlob
+  );
+
+  checkAllRecordingsReady();
+}
+
+
+/* =========================================================
+   GUEST RECEBE META
+========================================================= */
+
+function receiveGuestRecordMeta(
+  message
+) {
+
+  if (isHost) {
+    return;
+  }
+
+
+  if (
+    Number(message.round) !==
+    Number(currentRound)
+  ) {
+    return;
+  }
+
+
+  if (
+    !transferBuffers[
+      currentRound
+    ]
+  ) {
+
+    transferBuffers[
+      currentRound
+    ] = {};
+  }
+
+
+  transferBuffers[
+    currentRound
+  ][
+    message.playerId
+  ] = {
+
+    name:
+      getPlayerName(
+        message.playerId,
+        message.name
+      ),
+
+    mimeType:
+      message.mimeType ||
+      "audio/webm",
+
+    totalChunks:
+      Number(
+        message.totalChunks ||
+        0
+      ),
+
+    chunks:
+      new Array(
+        Number(
+          message.totalChunks ||
+          0
+        )
+      ),
+
+    received:
+      0,
+
+    totalBytes:
+      Number(
+        message.totalBytes ||
+        0
+      ),
+
+    complete: false
+  };
+}
+
+
+/*
+  O router usa a mesma função receiveRecordMeta.
+  Quando o guest receber RECORD_META do host,
+  precisamos separar de onde veio.
+*/
+
+const originalReceiveRecordMeta =
+  receiveRecordMeta;
+
+
+/* =========================================================
+   CHUNK RECEIVER UNIVERSAL
+========================================================= */
+
+function receiveChunkGuest(
+  message
+) {
+
+  if (isHost) {
+    return;
+  }
+
+
+  const roundBuffers =
+    transferBuffers[
+      currentRound
+    ];
+
+
+  if (!roundBuffers) {
+    return;
+  }
+
+
+  const buffer =
+    roundBuffers[
+      message.playerId
+    ];
+
+
+  if (!buffer) {
+    return;
+  }
+
+
+  const index =
+    Number(
+      message.index
+    );
+
+
+  if (
+    index < 0 ||
+    index >=
+    buffer.totalChunks
+  ) {
+    return;
+  }
+
+
+  if (
+    buffer.chunks[index]
+  ) {
+    return;
+  }
+
+
+  buffer.chunks[index] =
+    message.chunk;
+
+
+  buffer.received++;
+
+
+  if (
+    buffer.received >=
+    buffer.totalChunks
+  ) {
+
+    finalizeGuestTransfer(
+      message.playerId
+    );
+  }
+}
+
+
+function receiveCompleteGuest(
+  message
+) {
+
+  if (isHost) {
+    return;
+  }
+
+
+  const roundBuffers =
+    transferBuffers[
+      currentRound
+    ];
+
+
+  const buffer =
+    roundBuffers &&
+    roundBuffers[
+      message.playerId
+    ];
+
+
+  if (!buffer) {
+    return;
+  }
+
+
+  buffer.complete = true;
+
+
+  if (
+    buffer.received >=
+    buffer.totalChunks
+  ) {
+
+    finalizeGuestTransfer(
+      message.playerId
+    );
+  }
+}
+
+
+function finalizeGuestTransfer(
+  targetPlayerId
+) {
+
+  if (isHost) {
+    return;
+  }
+
+
+  const roundBuffers =
+    transferBuffers[
+      currentRound
+    ];
+
+
+  const buffer =
+    roundBuffers &&
+    roundBuffers[
+      targetPlayerId
+    ];
+
+
+  if (
+    !buffer ||
+    buffer.finalized
+  ) {
+    return;
+  }
+
+
+  if (
+    buffer.received <
+    buffer.totalChunks
+  ) {
+    return;
+  }
+
+
+  buffer.finalized =
+    true;
+
+
+  const blob =
+    chunksToBlob(
+      buffer.chunks,
+      buffer.mimeType
+    );
+
+
+  const name =
+    getPlayerName(
+      targetPlayerId,
+      buffer.name
+    );
+
+
+  saveReceivedRecording(
+    currentRound,
+    targetPlayerId,
+    name,
+    blob
+  );
+}
+
+
+/* =========================================================
+   PATCH DATA ROUTER PARA META/CHUNKS
+========================================================= */
+
+function handleRecordingData(
+  message
+) {
+
+  if (
+    message.type ===
+    "RECORD_META"
+  ) {
+
+    if (isHost) {
+
+      receiveRecordMeta(
+        message
+      );
+
+    } else {
+
+      receiveGuestRecordMeta(
+        message
+      );
+    }
+
+    return true;
+  }
+
+
+  if (
+    message.type ===
+    "RECORD_CHUNK"
+  ) {
+
+    if (isHost) {
+
+      receiveRecordChunk(
+        message
+      );
+
+    } else {
+
+      receiveChunkGuest(
+        message
+      );
+    }
+
+    return true;
+  }
+
+
+  if (
+    message.type ===
+    "RECORD_COMPLETE"
+  ) {
+
+    if (isHost) {
+
+      receiveRecordComplete(
+        message
+      );
+
+    } else {
+
+      receiveCompleteGuest(
+        message
+      );
+    }
+
+    return true;
+  }
+
+
+  return false;
+}
+
+
+/* =========================================================
+   SUBSTITUI MESSAGE ROUTER
+========================================================= */
+
+const oldHandleDataMessage =
+  handleDataMessage;
+
+
+/*
+  Reimplementação para interceptar
+  mensagens binárias da gravação.
+*/
+
+function routeDataMessage(
+  conn,
+  message
+) {
+
+  if (
+    message &&
+    (
+      message.type ===
+      "RECORD_META" ||
+      message.type ===
+      "RECORD_CHUNK" ||
+      message.type ===
+      "RECORD_COMPLETE"
+    )
+  ) {
+
+    handleRecordingData(
+      message
+    );
+
+    return;
+  }
+
+
+  handleNormalDataMessage(
+    conn,
+    message
+  );
+}
+
+
+/*
+  Conteúdo principal do router sem os
+  três tipos de gravação.
+*/
+
+function handleNormalDataMessage(
+  conn,
+  message
+) {
+
+  if (!message) {
+    return;
+  }
+
+
+  if (message.type === "JOIN") {
+
+    if (isHost) {
+      handlePlayerJoin(
+        conn,
+        message.player
+      );
+    }
+
+    return;
+  }
+
+
+  if (message.type === "ROOM_STATE") {
+
+    applyRoomState(
+      message.players
+    );
+
+    if (
+      typeof message.gameStarted ===
+      "boolean"
+    ) {
+
+      gameStarted =
+        message.gameStarted;
+    }
+
+    updateRoomUI();
+
+    return;
+  }
+
+
+  if (message.type === "PLAYER_LEFT") {
+
+    delete roomPlayers[
+      message.playerId
+    ];
+
+    updateRoomUI();
+
+    return;
+  }
+
+
+  if (message.type === "HEARTBEAT") {
+
+    if (isHost && message.player) {
+
+      const existing =
+        roomPlayers[
+          message.player.playerId
+        ];
+
+      if (existing) {
+
+        existing.lastSeen =
+          Date.now();
+
+        existing.peerId =
+          message.player.peerId;
+
+        /*
+          Nome vem do jogador.
+          Não usamos username local.
+        */
+
+        existing.name =
+          String(
+            message.player.name ||
+            existing.name
+          ).slice(0, 16);
+      }
+
+      broadcastRoomState();
+    }
+
+    return;
+  }
+
+
+  if (message.type === "GAME_START") {
+
+    applyGameStart(
+      message
+    );
+
+    return;
+  }
+
+
+  if (message.type === "REFERENCE") {
+
+    applyReference(
+      message
+    );
+
+    return;
+  }
+
+
+  if (message.type === "RECORD_START") {
+
+    applyRecordStart(
+      message
+    );
+
+    return;
+  }
+
+
+  if (message.type === "PLAYBACK_PLAN") {
+
+    applyPlaybackPlan(
+      message
+    );
+
+    return;
+  }
+
+
+  if (message.type === "PLAYBACK_SCORE") {
+
+    applyPlaybackScore(
+      message
+    );
+
+    return;
+  }
+
+
+  if (message.type === "ROUND_RESULT") {
+
+    applyRoundResult(
+      message
+    );
+
+    return;
+  }
+
+
+  if (message.type === "NEXT_ROUND") {
+
+    applyNextRound(
+      message
+    );
+
+    return;
+  }
+
+
+  if (message.type === "GAME_FINISH") {
+
+    applyGameFinish(
+      message
+    );
+
+    return;
+  }
+}
+
+
+/*
+  Troca o callback usado pelas conexões.
+*/
+
+function installDataRouter() {
+
+  /*
+    O listener original foi criado
+    em setupDataConnection.
+    Como ele chama handleDataMessage,
+    interceptamos substituindo a função
+    global usada no próximo fluxo.
+  */
+}
+
+
+/* =========================================================
+   REDEFINE HANDLE DATA MESSAGE
+========================================================= */
+
+handleDataMessage = routeDataMessage;
+
+
+/* =========================================================
+   RECORDINGS
+========================================================= */
+
+function ensureRoundStorage(
+  round
+) {
+
+  if (!recordings[round]) {
+    recordings[round] = {};
+  }
+
+  if (!scores[round]) {
+    scores[round] = {};
+  }
+
+  if (!transferBuffers[round]) {
+    transferBuffers[round] = {};
+  }
+}
+
+
+function saveReceivedRecording(
+  round,
+  targetPlayerId,
+  name,
+  blob
+) {
+
+  ensureRoundStorage(
+    round
+  );
+
+
+  const old =
+    recordings[round][
+      targetPlayerId
+    ];
+
+
+  if (old && old.url) {
+
+    try {
+      URL.revokeObjectURL(
+        old.url
+      );
+    } catch {}
+  }
+
+
+  const url =
+    URL.createObjectURL(
+      blob
+    );
+
+
+  recordings[round][
+    targetPlayerId
+  ] = {
+
+    playerId:
+      targetPlayerId,
+
+    name:
+      getPlayerName(
+        targetPlayerId,
+        name
+      ),
+
+    blob,
+
+    url,
+
+    size:
+      blob.size,
+
+    received: true
+  };
+}
+
+
+function chunksToBlob(
+  chunks,
+  mimeType
+) {
+
+  const validChunks =
+    chunks.filter(
+      (chunk) =>
+        chunk !== undefined &&
+        chunk !== null
+    );
+
+
+  return new Blob(
+    validChunks,
+    {
+      type:
+        mimeType ||
+        "audio/webm"
+    }
+  );
+}
+
+
+/* =========================================================
+   CHECK ALL RECORDINGS
+========================================================= */
+
+function expectedPlayerIds() {
+
+  return Object.values(
+    roomPlayers
+  )
+    .filter(
+      (player) =>
+        player.connected !== false
+    )
+    .map(
+      (player) =>
+        player.playerId
+    );
+}
+
+
+function allRecordingsReady() {
+
+  const expected =
+    expectedPlayerIds();
+
+
+  const current =
+    recordings[
+      currentRound
+    ] || {};
+
+
+  if (
+    expected.length === 0
+  ) {
+    return false;
+  }
+
+
+  return expected.every(
+    (id) => {
+
+      const recording =
+        current[id];
+
+      return !!(
+        recording &&
+        recording.blob &&
+        recording.blob.size > 0
+      );
+    }
+  );
+}
+
+
+function checkAllRecordingsReady() {
+
+  if (!isHost) {
+    return;
+  }
+
+
+  if (
+    waitingForRecordings
+  ) {
+    return;
+  }
+
+
+  if (
+    allRecordingsReady()
+  ) {
+
+    waitingForRecordings =
+      true;
+
+    beginPlaybackPhase();
+
+    return;
+  }
+
+
+  /*
+    Timeout de segurança.
+    Se alguém caiu, não trava para sempre.
+  */
+
+  if (!roundTimer) {
+
+    roundTimer =
+      setTimeout(
+        () => {
+
+          roundTimer = null;
+
+          if (
+            isHost &&
+            !waitingForRecordings
+          ) {
+
+            waitingForRecordings =
+              true;
+
+            beginPlaybackPhase();
+          }
+
+        },
+        15000
+      );
   }
 }
 
@@ -2034,323 +4926,1759 @@ function stopRecorder() {
    PLAYBACK
 ========================================================= */
 
-function startPlayback() {
+function beginPlaybackPhase() {
 
-  hideGameScreens();
+  clearRoundTimers();
+
+  const current =
+    recordings[
+      currentRound
+    ] || {};
+
+
+  const order =
+    Object.keys(
+      current
+    ).filter(
+      (id) =>
+        current[id] &&
+        current[id].blob &&
+        current[id].blob.size > 0
+    );
+
+
+  /*
+    Mantém a ordem da sala.
+  */
+
+  order.sort(
+    (a, b) => {
+
+      const pa =
+        roomPlayers[a];
+
+      const pb =
+        roomPlayers[b];
+
+      if (
+        pa &&
+        pb
+      ) {
+
+        if (
+          pa.isHost &&
+          !pb.isHost
+        ) {
+          return -1;
+        }
+
+        if (
+          !pa.isHost &&
+          pb.isHost
+        ) {
+          return 1;
+        }
+      }
+
+      return String(a)
+        .localeCompare(
+          String(b)
+        );
+    }
+  );
+
+
+  const plan = {
+
+    type:
+      "PLAYBACK_PLAN",
+
+    round:
+      currentRound,
+
+    order
+  };
+
+
+  broadcast(
+    plan
+  );
+
+
+  applyPlaybackPlan(
+    plan
+  );
+}
+
+
+async function applyPlaybackPlan(
+  message
+) {
+
+  if (
+    Number(message.round) !==
+    Number(currentRound)
+  ) {
+    return;
+  }
+
+
+  hideAllGameScreens();
 
   playbackScreen.classList.remove(
     "hidden"
   );
 
+
   /*
-   * Aqui ninguém transmite voz.
-   * O áudio recebido continua existindo,
-   * mas as faixas locais ficam desligadas.
-   */
-  setTracksEnabled(false);
+    Chat voice desligado durante playback.
+  */
 
-  gameVoiceEnabled =
-    false;
+  gameVoiceEnabled = false;
 
-  updateGameVoiceUI();
+  if (localStream) {
 
-  playbackName.textContent =
-    username;
+    setOutgoingTracksEnabled(
+      false
+    );
+  }
 
-  playbackStatus.textContent =
-    "Ouça a gravação.";
+  updateGameVoiceButton();
 
-  let seconds = 7;
 
-  playbackTimer.textContent =
-    seconds;
+  const order =
+    Array.isArray(message.order)
+      ? message.order
+      : [];
 
-  clearInterval(
-    playbackTimerHandle
+
+  await playPlaybackOrder(
+    order
   );
 
-  if (activePlaybackAudio) {
 
-    try {
-      activePlaybackAudio.pause();
-    } catch (_) {}
+  /*
+    Só o host calcula e manda
+    os resultados depois do playback.
+  */
 
-    activePlaybackAudio = null;
+  if (isHost) {
+
+    await calculateRoundScores(
+      order
+    );
   }
+}
 
-  if (recordedUrl) {
 
-    activePlaybackAudio =
-      new Audio(
-        recordedUrl
+async function playPlaybackOrder(
+  order
+) {
+
+  for (
+    const targetPlayerId
+    of order
+  ) {
+
+    const recording =
+      recordings[
+        currentRound
+      ] &&
+      recordings[
+        currentRound
+      ][
+        targetPlayerId
+      ];
+
+
+    if (!recording) {
+      continue;
+    }
+
+
+    const name =
+      getPlayerName(
+        targetPlayerId,
+        recording.name
       );
 
-    activePlaybackAudio.volume =
-      1;
 
-    activePlaybackAudio.preload =
-      "auto";
+    playbackPlayerName.textContent =
+      name;
 
-    activePlaybackAudio
-      .play()
-      .catch(() => {});
 
-  } else {
+    playbackScore.classList.add(
+      "hidden"
+    );
+
 
     playbackStatus.textContent =
-      "Gravação indisponível.";
-  }
+      "Reproduzindo áudio...";
 
-  playbackTimerHandle =
-    setInterval(
-      () => {
 
-        seconds--;
+    hideAllGameScreens();
 
-        playbackTimer.textContent =
-          Math.max(
-            0,
-            seconds
-          );
+    playbackScreen.classList.remove(
+      "hidden"
+    );
 
-        if (seconds <= 0) {
 
-          clearInterval(
-            playbackTimerHandle
-          );
+    await playBlob(
+      recording.blob
+    );
 
-          playbackTimerHandle =
-            null;
 
-          finishRound();
-        }
+    /*
+      Calcula a pontuação local
+      apenas depois de ouvir.
+    */
 
-      },
+    const score =
+      await scoreRecording(
+        currentReferenceData,
+        recording.blob
+      );
+
+
+    scores[
+      currentRound
+    ][
+      targetPlayerId
+    ] = score;
+
+
+    playbackScore.textContent =
+      score;
+
+
+    playbackScore.classList.remove(
+      "hidden"
+    );
+
+
+    playbackStatus.textContent =
+      "Pontuação analisada.";
+
+
+    await sleep(
       1000
     );
+  }
+}
+
+
+function playBlob(
+  blob
+) {
+
+  return new Promise(
+    (resolve) => {
+
+      if (!blob) {
+
+        resolve();
+
+        return;
+      }
+
+
+      const url =
+        URL.createObjectURL(
+          blob
+        );
+
+
+      const audio =
+        new Audio();
+
+
+      playbackAudio =
+        audio;
+
+
+      audio.preload =
+        "auto";
+
+      audio.src =
+        url;
+
+
+      audio.playsInline =
+        true;
+
+
+      const finish =
+        () => {
+
+          try {
+            audio.pause();
+          } catch {}
+
+          audio.src = "";
+
+          try {
+            URL.revokeObjectURL(
+              url
+            );
+          } catch {}
+
+          if (
+            playbackAudio ===
+            audio
+          ) {
+
+            playbackAudio =
+              null;
+          }
+
+          resolve();
+        };
+
+
+      audio.addEventListener(
+        "ended",
+        finish,
+        {
+          once: true
+        }
+      );
+
+
+      audio.addEventListener(
+        "error",
+        finish,
+        {
+          once: true
+        }
+      );
+
+
+      const promise =
+        audio.play();
+
+
+      if (
+        promise &&
+        typeof promise.catch ===
+          "function"
+      ) {
+
+        promise.catch(
+          () => {
+
+            /*
+              Se autoplay for bloqueado,
+              tenta novamente.
+            */
+
+            setTimeout(
+              () => {
+
+                audio.play()
+                  .catch(
+                    finish
+                  );
+
+              },
+              100
+            );
+          }
+        );
+      }
+
+
+      /*
+        Segurança:
+        nunca fica preso se o áudio
+        não disparar ended.
+      */
+
+      const fallback =
+        setTimeout(
+          finish,
+          Math.max(
+            2500,
+            (blob.size / 8000) *
+              1000 +
+              9000
+          )
+        );
+
+
+      const originalFinish =
+        finish;
+
+      /*
+        O clearTimeout é feito quando
+        o evento terminar.
+      */
+
+      audio.addEventListener(
+        "ended",
+        () => {
+          clearTimeout(
+            fallback
+          );
+        },
+        {
+          once: true
+        }
+      );
+    }
+  );
 }
 
 
 /* =========================================================
-   PONTUAÇÃO
+   SCORING
 ========================================================= */
 
-function calculateScore() {
+/*
+  Não é um modelo ML.
+  É uma análise local de áudio.
+
+  Pontos usados:
+  - presença de áudio
+  - duração útil
+  - energia
+  - ataques
+  - ritmo aproximado
+  - pitch aproximado quando possível
+
+  Voz/timbre não são usados como fator principal.
+*/
+
+async function scoreRecording(
+  reference,
+  blob
+) {
+
+  if (
+    !blob ||
+    blob.size <
+    100
+  ) {
+
+    return 0;
+  }
+
+
+  let audioBuffer;
+
+
+  try {
+
+    audioBuffer =
+      await decodeBlob(
+        blob
+      );
+
+  } catch {
+
+    /*
+      Mesmo se o navegador não conseguir
+      decodificar perfeitamente, uma gravação
+      real não deve automaticamente virar 0.
+    */
+
+    return 35;
+  }
+
+
+  if (!audioBuffer) {
+    return 0;
+  }
+
+
+  const features =
+    extractAudioFeatures(
+      audioBuffer
+    );
+
+
+  if (
+    features.rms <
+    0.006
+  ) {
+
+    return 0;
+  }
+
 
   /*
-   * Não usa mais o tamanho do arquivo
-   * como se fosse uma IA.
-   *
-   * Silêncio recebe 0.
-   */
+    BASE:
+    se existe som real, começa com 25.
+  */
+
+  let score = 25;
+
+
+  /*
+    Duração útil
+  */
+
+  const durationScore =
+    Math.min(
+      20,
+      features.activeRatio *
+        25
+    );
+
+
+  score +=
+    durationScore;
+
+
+  /*
+    Energia suficiente
+  */
+
   if (
-    !recordedBlob ||
-    recordedBlob.size < 4000
+    features.rms >
+    0.015
+  ) {
+
+    score += 10;
+
+  } else if (
+    features.rms >
+    0.008
+  ) {
+
+    score += 6;
+  }
+
+
+  /*
+    Ataques:
+    falar, cantar, bater ou fazer som
+    produz mudanças de energia.
+  */
+
+  const attackScore =
+    Math.min(
+      20,
+      features.attacks.length *
+        4
+    );
+
+
+  score +=
+    attackScore;
+
+
+  /*
+    Ritmo:
+    verifica espaçamento aproximado
+    entre ataques.
+  */
+
+  const rhythm =
+    rhythmConsistency(
+      features.attacks
+    );
+
+
+  score +=
+    rhythm * 15;
+
+
+  /*
+    Pitch:
+    somente se conseguirmos detectar.
+  */
+
+  if (
+    reference &&
+    features.pitches.length > 0
+  ) {
+
+    const pitchScore =
+      comparePitchPattern(
+        reference.frequencies || [],
+        features.pitches
+      );
+
+
+    score +=
+      pitchScore * 10;
+  }
+
+
+  /*
+    Nunca mais dá 0 para alguém que
+    realmente produziu áudio.
+  */
+
+  score =
+    Math.round(
+      Math.max(
+        1,
+        Math.min(
+          100,
+          score
+        )
+      )
+    );
+
+
+  return score;
+}
+
+
+async function decodeBlob(
+  blob
+) {
+
+  const arrayBuffer =
+    await blob.arrayBuffer();
+
+
+  const AudioContext =
+    window.AudioContext ||
+    window.webkitAudioContext;
+
+
+  if (!AudioContext) {
+    return null;
+  }
+
+
+  const ctx =
+    new AudioContext();
+
+
+  try {
+
+    const buffer =
+      await ctx.decodeAudioData(
+        arrayBuffer
+      );
+
+
+    try {
+      await ctx.close();
+    } catch {}
+
+
+    return buffer;
+
+  } catch (error) {
+
+    try {
+      await ctx.close();
+    } catch {}
+
+    throw error;
+  }
+}
+
+
+function extractAudioFeatures(
+  audioBuffer
+) {
+
+  const channel =
+    audioBuffer.getChannelData(
+      0
+    );
+
+
+  const sampleRate =
+    audioBuffer.sampleRate;
+
+
+  const windowSize =
+    Math.max(
+      512,
+      Math.floor(
+        sampleRate *
+        0.025
+      )
+    );
+
+
+  const hop =
+    Math.floor(
+      sampleRate *
+      0.0125
+    );
+
+
+  let energySum = 0;
+
+  let activeWindows = 0;
+
+  const energies = [];
+
+  const pitches = [];
+
+
+  for (
+    let i = 0;
+    i + windowSize <
+    channel.length;
+    i += hop
+  ) {
+
+    let sum = 0;
+
+    let crossings = 0;
+
+    let previous =
+      channel[i];
+
+
+    for (
+      let j = 0;
+      j < windowSize;
+      j++
+    ) {
+
+      const sample =
+        channel[
+          i + j
+        ];
+
+
+      sum +=
+        sample *
+        sample;
+
+
+      if (
+        (sample >= 0 &&
+          previous < 0) ||
+        (sample < 0 &&
+          previous >= 0)
+      ) {
+
+        crossings++;
+      }
+
+
+      previous =
+        sample;
+    }
+
+
+    const rms =
+      Math.sqrt(
+        sum /
+        windowSize
+      );
+
+
+    energySum +=
+      rms;
+
+
+    energies.push(
+      rms
+    );
+
+
+    if (
+      rms >
+      0.008
+    ) {
+
+      activeWindows++;
+    }
+
+
+    /*
+      Estimativa simples de pitch.
+      Não serve para timbre, apenas para
+      frequência fundamental aproximada.
+    */
+
+    const seconds =
+      windowSize /
+      sampleRate;
+
+
+    const frequency =
+      crossings /
+      2 /
+      seconds;
+
+
+    if (
+      frequency >= 70 &&
+      frequency <= 1000
+    ) {
+
+      pitches.push(
+        frequency
+      );
+    }
+  }
+
+
+  const rms =
+    energies.length
+      ? energySum /
+        energies.length
+      : 0;
+
+
+  const activeRatio =
+    energies.length
+      ? activeWindows /
+        energies.length
+      : 0;
+
+
+  const attacks =
+    detectAttacks(
+      energies
+    );
+
+
+  return {
+
+    rms,
+
+    activeRatio,
+
+    attacks,
+
+    pitches,
+
+    duration:
+      audioBuffer.duration
+  };
+}
+
+
+function detectAttacks(
+  energies
+) {
+
+  const attacks = [];
+
+
+  if (
+    energies.length <
+    3
+  ) {
+    return attacks;
+  }
+
+
+  for (
+    let i = 1;
+    i <
+    energies.length - 1;
+    i++
+  ) {
+
+    const previous =
+      energies[i - 1];
+
+    const current =
+      energies[i];
+
+    const next =
+      energies[i + 1];
+
+
+    if (
+      current >
+      0.012 &&
+      current >
+      previous * 1.45 &&
+      current >=
+      next
+    ) {
+
+      attacks.push(
+        i
+      );
+    }
+  }
+
+
+  /*
+    Remove ataques muito próximos.
+  */
+
+  const filtered = [];
+
+
+  for (
+    const attack
+    of attacks
+  ) {
+
+    const last =
+      filtered[
+        filtered.length - 1
+      ];
+
+
+    if (
+      last === undefined ||
+      attack - last >
+        8
+    ) {
+
+      filtered.push(
+        attack
+      );
+    }
+  }
+
+
+  return filtered;
+}
+
+
+function rhythmConsistency(
+  attacks
+) {
+
+  if (
+    attacks.length <
+    2
+  ) {
+
+    return attacks.length === 1
+      ? 0.45
+      : 0;
+  }
+
+
+  const gaps = [];
+
+
+  for (
+    let i = 1;
+    i <
+    attacks.length;
+    i++
+  ) {
+
+    gaps.push(
+      attacks[i] -
+      attacks[i - 1]
+    );
+  }
+
+
+  const average =
+    gaps.reduce(
+      (a, b) => a + b,
+      0
+    ) /
+    gaps.length;
+
+
+  if (
+    average <= 0
   ) {
     return 0;
   }
 
-  /*
-   * Base provisória enquanto o analisador
-   * real de áudio não foi colocado.
-   */
-  return 50;
+
+  let variance = 0;
+
+
+  for (
+    const gap of gaps
+  ) {
+
+    const diff =
+      gap -
+      average;
+
+    variance +=
+      diff * diff;
+  }
+
+
+  variance /=
+    gaps.length;
+
+
+  const deviation =
+    Math.sqrt(
+      variance
+    );
+
+
+  const normalized =
+    deviation /
+    average;
+
+
+  return Math.max(
+    0,
+    Math.min(
+      1,
+      1 -
+        normalized
+    )
+  );
 }
 
-function finishRound() {
 
-  if (activePlaybackAudio) {
+function comparePitchPattern(
+  referenceFrequencies,
+  pitches
+) {
 
-    try {
-      activePlaybackAudio.pause();
-    } catch (_) {}
+  if (
+    !referenceFrequencies.length ||
+    !pitches.length
+  ) {
 
-    activePlaybackAudio = null;
+    return 0.45;
   }
 
-  const score =
-    calculateScore();
 
-  hideGameScreens();
+  const refAverage =
+    referenceFrequencies.reduce(
+      (a, b) => a + b,
+      0
+    ) /
+    referenceFrequencies.length;
 
-  resultScreen.classList.remove(
-    "hidden"
-  );
 
-  resultText.textContent =
-    `Você fez ${score} pontos nesta rodada.`;
+  const userAverage =
+    pitches.reduce(
+      (a, b) => a + b,
+      0
+    ) /
+    pitches.length;
+
 
   /*
-   * Depois do playback a conversa volta.
-   */
-  if (micEnabled) {
+    Comparamos proporção em vez de timbre.
+  */
 
-    gameVoiceEnabled =
-      true;
+  const refRange =
+    Math.max(
+      ...referenceFrequencies
+    ) -
+    Math.min(
+      ...referenceFrequencies
+    );
 
-    setTracksEnabled(true);
 
-    updateGameVoiceUI();
+  const userRange =
+    Math.max(
+      ...pitches
+    ) -
+    Math.min(
+      ...pitches
+    );
 
-    connectVoiceToEveryone();
-  }
 
-  if (isHost) {
+  const avgRatio =
+    Math.min(
+      refAverage,
+      userAverage
+    ) /
+    Math.max(
+      refAverage,
+      userAverage
+    );
+
+
+  const rangeRatio =
+    Math.min(
+      refRange + 1,
+      userRange + 1
+    ) /
+    Math.max(
+      refRange + 1,
+      userRange + 1
+    );
+
+
+  return Math.max(
+    0,
+    Math.min(
+      1,
+      (
+        avgRatio * .55 +
+        rangeRatio * .45
+      )
+    )
+  );
+}
+
+
+/* =========================================================
+   HOST CALCULA RESULTADOS
+========================================================= */
+
+async function calculateRoundScores(
+  order
+) {
+
+  ensureRoundStorage(
+    currentRound
+  );
+
+
+  for (
+    const targetPlayerId
+    of order
+  ) {
+
+    const recording =
+      recordings[
+        currentRound
+      ][
+        targetPlayerId
+      ];
+
+
+    if (!recording) {
+
+      scores[
+        currentRound
+      ][
+        targetPlayerId
+      ] = 0;
+
+      continue;
+    }
+
+
+    const score =
+      await scoreRecording(
+        currentReferenceData,
+        recording.blob
+      );
+
+
+    scores[
+      currentRound
+    ][
+      targetPlayerId
+    ] = score;
+
 
     broadcast({
       type:
-        "ROUND_RESULT",
-
-      score,
+        "PLAYBACK_SCORE",
 
       round:
-        currentRound
+        currentRound,
+
+      playerId:
+        targetPlayerId,
+
+      score
     });
+  }
 
-    setTimeout(
-      () => {
 
-        if (
-          currentRound >=
-          MAX_ROUNDS
-        ) {
+  await sleep(
+    700
+  );
 
-          broadcast({
-            type:
-              "GAME_FINISH"
-          });
 
-          finishGame();
+  finishRound();
+}
 
-        } else {
 
-          currentRound++;
+/* =========================================================
+   PLAYBACK SCORE
+========================================================= */
 
-          broadcast({
-            type:
-              "ROUND_COUNTDOWN",
+function applyPlaybackScore(
+  message
+) {
 
-            round:
-              currentRound
-          });
+  if (
+    Number(message.round) !==
+    Number(currentRound)
+  ) {
+    return;
+  }
 
-          startCountdown(
-            currentRound
-          );
-        }
 
-      },
-      4500
+  ensureRoundStorage(
+    currentRound
+  );
+
+
+  scores[
+    currentRound
+  ][
+    message.playerId
+  ] =
+    Number(
+      message.score
+    );
+
+
+  if (
+    message.playerId ===
+    playerId
+  ) {
+
+    playbackScore.textContent =
+      message.score;
+
+    playbackScore.classList.remove(
+      "hidden"
     );
   }
 }
 
-function showResult(
-  score,
-  round
+
+/* =========================================================
+   ROUND RESULT
+========================================================= */
+
+function finishRound() {
+
+  if (!isHost) {
+    return;
+  }
+
+
+  const currentScores =
+    scores[
+      currentRound
+    ] || {};
+
+
+  const rows =
+    Object.values(
+      roomPlayers
+    ).map(
+      (player) => ({
+
+        playerId:
+          player.playerId,
+
+        name:
+          player.name,
+
+        score:
+          Number(
+            currentScores[
+              player.playerId
+            ] || 0
+          )
+      })
+    );
+
+
+  rows.sort(
+    (a, b) =>
+      b.score -
+      a.score
+  );
+
+
+  const message = {
+
+    type:
+      "ROUND_RESULT",
+
+    round:
+      currentRound,
+
+    scores:
+      rows
+  };
+
+
+  broadcast(
+    message
+  );
+
+
+  applyRoundResult(
+    message
+  );
+}
+
+
+function applyRoundResult(
+  message
 ) {
 
-  hideGameScreens();
+  hideAllGameScreens();
 
   resultScreen.classList.remove(
     "hidden"
   );
 
-  resultText.textContent =
-    typeof score === "number"
-      ? `Você fez ${score} pontos nesta rodada.`
-      : "Rodada concluída.";
 
-  /*
-   * Conversa volta depois do playback.
-   */
-  if (micEnabled) {
+  resultList.innerHTML = "";
 
-    gameVoiceEnabled =
-      true;
 
-    setTracksEnabled(true);
+  const rows =
+    Array.isArray(
+      message.scores
+    )
+      ? message.scores
+      : [];
 
-    updateGameVoiceUI();
 
-    connectVoiceToEveryone();
+  for (
+    let i = 0;
+    i < rows.length;
+    i++
+  ) {
+
+    const row =
+      rows[i];
+
+
+    const element =
+      document.createElement(
+        "div"
+      );
+
+    element.className =
+      "score-row";
+
+
+    const position =
+      document.createElement(
+        "div"
+      );
+
+    position.className =
+      "score-position";
+
+    position.textContent =
+      `${i + 1}º`;
+
+
+    const name =
+      document.createElement(
+        "div"
+      );
+
+    name.className =
+      "score-name";
+
+    name.textContent =
+      getPlayerName(
+        row.playerId,
+        row.name
+      );
+
+
+    const score =
+      document.createElement(
+        "div"
+      );
+
+    score.className =
+      "score-value";
+
+    score.textContent =
+      row.score;
+
+
+    element.appendChild(
+      position
+    );
+
+    element.appendChild(
+      name
+    );
+
+    element.appendChild(
+      score
+    );
+
+
+    resultList.appendChild(
+      element
+    );
   }
-}
 
 
-/* =========================================================
-   FINAL
-========================================================= */
+  const mine =
+    rows.find(
+      (row) =>
+        row.playerId ===
+        playerId
+    );
 
-function finishGame() {
 
-  gameStarted = false;
+  if (mine) {
 
-  clearInterval(
-    countdownTimer
-  );
+    resultText.textContent =
+      `Você fez ${mine.score} pontos.`;
 
-  clearInterval(
-    recordTimer
-  );
-
-  clearInterval(
-    playbackTimerHandle
-  );
-
-  countdownTimer = null;
-  recordTimer = null;
-  playbackTimerHandle = null;
-
-  if (activePlaybackAudio) {
-
-    try {
-      activePlaybackAudio.pause();
-    } catch (_) {}
-
-    activePlaybackAudio = null;
-  }
-
-  /*
-   * Voz normal volta ao terminar.
-   */
-  if (micEnabled) {
-    setTracksEnabled(true);
-    gameVoiceEnabled = true;
   } else {
-    gameVoiceEnabled = false;
+
+    resultText.textContent =
+      "Rodada concluída.";
   }
 
-  updateGameVoiceUI();
+
+  /*
+    Voz volta somente depois da
+    tela de resultado.
+  */
 
   setTimeout(
     () => {
 
-      showScreen(
-        roomScreen
-      );
+      if (
+        gameStarted &&
+        localStream
+      ) {
 
-      setStatus(
-        "Partida finalizada."
-      );
+        gameVoiceEnabled = false;
 
-      if (isHost) {
-        startButton.classList.remove(
-          "hidden"
-        );
+        updateGameVoiceButton();
+      }
+
+      if (
+        isHost
+      ) {
+
+        if (
+          currentRound <
+          TOTAL_ROUNDS
+        ) {
+
+          const nextRound =
+            currentRound + 1;
+
+
+          const message = {
+
+            type:
+              "NEXT_ROUND",
+
+            round:
+              nextRound
+          };
+
+
+          broadcast(
+            message
+          );
+
+
+          applyNextRound(
+            message
+          );
+
+        } else {
+
+          const finalMessage = {
+
+            type:
+              "GAME_FINISH",
+
+            scores:
+              calculateFinalScores()
+          };
+
+
+          broadcast(
+            finalMessage
+          );
+
+
+          applyGameFinish(
+            finalMessage
+          );
+        }
       }
 
     },
-    1000
+    3500
   );
 }
 
 
 /* =========================================================
-   UI GAME
+   NEXT ROUND
 ========================================================= */
 
-function hideGameScreens() {
+function applyNextRound(
+  message
+) {
+
+  currentRound =
+    Number(
+      message.round
+    );
+
+
+  waitingForRecordings =
+    false;
+
+
+  ensureRoundStorage(
+    currentRound
+  );
+
+
+  clearRoundTimers();
+
+  updateRoundUI();
+
+  beginRoundCountdown();
+}
+
+
+/* =========================================================
+   FINAL SCORES
+========================================================= */
+
+function calculateFinalScores() {
+
+  const total = {};
+
+
+  for (
+    const player
+    of Object.values(
+      roomPlayers
+    )
+  ) {
+
+    total[
+      player.playerId
+    ] = {
+
+      playerId:
+        player.playerId,
+
+      name:
+        player.name,
+
+      score: 0
+    };
+  }
+
+
+  for (
+    const round
+    of Object.values(
+      scores
+    )
+  ) {
+
+    for (
+      const playerIdScore
+      in round
+    ) {
+
+      if (
+        !total[
+          playerIdScore
+        ]
+      ) {
+
+        total[
+          playerIdScore
+        ] = {
+
+          playerId:
+            playerIdScore,
+
+          name:
+            getPlayerName(
+              playerIdScore,
+              "Jogador"
+            ),
+
+          score: 0
+        };
+      }
+
+
+      total[
+        playerIdScore
+      ].score +=
+        Number(
+          round[
+            playerIdScore
+          ] || 0
+        );
+    }
+  }
+
+
+  return Object.values(
+    total
+  ).sort(
+    (a, b) =>
+      b.score -
+      a.score
+  );
+}
+
+
+/* =========================================================
+   FINAL GAME
+========================================================= */
+
+function applyGameFinish(
+  message
+) {
+
+  gameStarted = false;
+
+  clearRoundTimers();
+
+  gameVoiceEnabled = false;
+
+  if (localStream) {
+
+    setOutgoingTracksEnabled(
+      false
+    );
+  }
+
+  updateGameVoiceButton();
+
+  hideAllGameScreens();
+
+  finalScreen.classList.remove(
+    "hidden"
+  );
+
+
+  finalList.innerHTML = "";
+
+
+  const rows =
+    Array.isArray(
+      message.scores
+    )
+      ? message.scores
+      : [];
+
+
+  for (
+    let i = 0;
+    i < rows.length;
+    i++
+  ) {
+
+    const row =
+      rows[i];
+
+
+    const element =
+      document.createElement(
+        "div"
+      );
+
+    element.className =
+      "score-row";
+
+
+    const position =
+      document.createElement(
+        "div"
+      );
+
+    position.className =
+      "score-position";
+
+    position.textContent =
+      `${i + 1}º`;
+
+
+    const name =
+      document.createElement(
+        "div"
+      );
+
+    name.className =
+      "score-name";
+
+    name.textContent =
+      getPlayerName(
+        row.playerId,
+        row.name
+      );
+
+
+    const score =
+      document.createElement(
+        "div"
+      );
+
+    score.className =
+      "score-value";
+
+    score.textContent =
+      row.score;
+
+
+    element.appendChild(
+      position
+    );
+
+    element.appendChild(
+      name
+    );
+
+    element.appendChild(
+      score
+    );
+
+
+    finalList.appendChild(
+      element
+    );
+  }
+}
+
+
+/* =========================================================
+   VOLTAR PARA SALA
+========================================================= */
+
+backToRoomButton.addEventListener(
+  "click",
+  () => {
+
+    gameStarted = false;
+
+    clearRoundTimers();
+
+    gameVoiceEnabled =
+      false;
+
+    if (localStream) {
+
+      setOutgoingTracksEnabled(
+        !micEnabled
+          ? false
+          : true
+      );
+    }
+
+    updateGameVoiceButton();
+    updateVoiceUI();
+
+    showRoom();
+
+    broadcastRoomState();
+  }
+);
+
+
+/* =========================================================
+   CLEAR GAME
+========================================================= */
+
+function hideAllGameScreens() {
 
   countdownScreen.classList.add(
     "hidden"
@@ -2364,6 +6692,10 @@ function hideGameScreens() {
     "hidden"
   );
 
+  uploadScreen.classList.add(
+    "hidden"
+  );
+
   playbackScreen.classList.add(
     "hidden"
   );
@@ -2371,11 +6703,84 @@ function hideGameScreens() {
   resultScreen.classList.add(
     "hidden"
   );
+
+  finalScreen.classList.add(
+    "hidden"
+  );
+}
+
+
+function clearRoundTimers() {
+
+  if (roundTimer) {
+
+    clearTimeout(
+      roundTimer
+    );
+
+    clearInterval(
+      roundTimer
+    );
+
+    roundTimer = null;
+  }
+
+  clearRecordTimer();
 }
 
 
 /* =========================================================
-   COPIAR
+   HELPERS DE JOGADOR
+========================================================= */
+
+function getPlayerById(
+  targetPlayerId
+) {
+
+  return roomPlayers[
+    targetPlayerId
+  ] || null;
+}
+
+
+function getPlayerName(
+  targetPlayerId,
+  fallback
+) {
+
+  const player =
+    getPlayerById(
+      targetPlayerId
+    );
+
+
+  if (
+    player &&
+    player.name
+  ) {
+
+    return player.name;
+  }
+
+
+  if (
+    targetPlayerId ===
+    playerId
+  ) {
+
+    return username;
+  }
+
+
+  return String(
+    fallback ||
+    "Jogador"
+  ).slice(0, 16);
+}
+
+
+/* =========================================================
+   COPY
 ========================================================= */
 
 copyCodeButton.addEventListener(
@@ -2393,17 +6798,27 @@ copyCodeButton.addEventListener(
 
       setTimeout(
         () => {
+
           copyCodeButton.textContent =
             "Copiar código";
+
         },
-        1400
+        1200
       );
 
-    } catch (_) {
+    } catch {
 
-      setStatus(
-        "Código: " +
-        roomCode
+      copyCodeButton.textContent =
+        roomCode;
+
+      setTimeout(
+        () => {
+
+          copyCodeButton.textContent =
+            "Copiar código";
+
+        },
+        1200
       );
     }
   }
@@ -2411,178 +6826,442 @@ copyCodeButton.addEventListener(
 
 
 /* =========================================================
-   SAIR
+   LEAVE ROOM
 ========================================================= */
 
 leaveRoomButton.addEventListener(
   "click",
-  leaveEverything
+  () => {
+
+    leaveRoom(
+      false
+    );
+  }
 );
 
-function sendLeave() {
+
+function leaveRoom(
+  silent
+) {
 
   if (
-    !peer ||
-    peer.destroyed ||
-    isHost
+    !joinedRoom &&
+    !peer
   ) {
+
+    if (!silent) {
+      showHome();
+    }
+
     return;
   }
 
-  const connection =
-    roomConnections.get(
-      roomPeerId
-    );
 
   if (
-    connection &&
-    connection.open
+    !isHost
   ) {
 
-    try {
+    const hostConnection =
+      findHostConnection();
 
-      connection.send({
-        type:
-          "LEAVE",
+    if (
+      hostConnection &&
+      hostConnection.open
+    ) {
 
-        id:
-          peer.id
-      });
+      sendToConnection(
+        hostConnection,
+        {
+          type:
+            "PLAYER_LEFT",
 
-    } catch (_) {}
+          playerId
+        }
+      );
+    }
   }
-}
 
-function leaveEverything() {
-
-  sendLeave();
 
   stopHeartbeat();
 
-  if (pruneTimer) {
+  clearRoundTimers();
 
-    clearInterval(
-      pruneTimer
-    );
 
-    pruneTimer = null;
+  for (
+    const call
+    of voiceCalls.values()
+  ) {
+
+    try {
+      call.close();
+    } catch {}
   }
 
-  roomConnections.forEach(
-    connection => {
 
-      try {
-        connection.close();
-      } catch (_) {}
-    }
-  );
+  for (
+    const call
+    of incomingVoiceCalls.values()
+  ) {
 
-  roomConnections.clear();
+    try {
+      call.close();
+    } catch {}
+  }
 
-  voiceCalls.forEach(
-    call => {
-
-      try {
-        call.close();
-      } catch (_) {}
-    }
-  );
 
   voiceCalls.clear();
+  incomingVoiceCalls.clear();
 
-  remoteAudioElements.forEach(
-    audio => {
 
-      try {
-        audio.pause();
-        audio.srcObject = null;
-        audio.remove();
-      } catch (_) {}
-    }
-  );
+  for (
+    const conn
+    of dataConnections.values()
+  ) {
 
-  remoteAudioElements.clear();
+    try {
+      conn.close();
+    } catch {}
+  }
+
+
+  dataConnections.clear();
+
 
   if (localStream) {
 
-    localStream
-      .getTracks()
-      .forEach(
-        track => track.stop()
-      );
+    for (
+      const track
+      of localStream.getTracks()
+    ) {
+
+      try {
+        track.stop();
+      } catch {}
+    }
 
     localStream = null;
   }
 
-  cleanupPeer();
-
-  players.clear();
-
-  roomCode = "";
-  roomPeerId = "";
-
-  isHost = false;
-  gameStarted = false;
-
-  micEnabled = false;
-  gameVoiceEnabled = false;
-
-  updateMicUI();
-  updateGameVoiceUI();
-
-  showScreen(
-    homeScreen
-  );
-}
-
-function cleanupPeer() {
 
   if (peer) {
 
     try {
       peer.destroy();
-    } catch (_) {}
+    } catch {}
+  }
 
-    peer = null;
+
+  peer = null;
+
+  joinedRoom = false;
+  gameStarted = false;
+
+  isHost = false;
+
+  roomCode = "";
+  hostPeerId = "";
+  myPeerId = "";
+
+  micEnabled = false;
+  gameVoiceEnabled = false;
+
+  roomPlayers = {};
+
+  clearRecordingStorage();
+
+  hideAllGameScreens();
+
+  joinPanel.classList.add(
+    "hidden"
+  );
+
+  if (!silent) {
+
+    showHome();
   }
 }
 
-window.addEventListener(
-  "beforeunload",
-  sendLeave
-);
+
+/* =========================================================
+   CLEAR RECORDING STORAGE
+========================================================= */
+
+function clearRecordingStorage() {
+
+  for (
+    const round
+    in recordings
+  ) {
+
+    for (
+      const id
+      in recordings[round]
+    ) {
+
+      const item =
+        recordings[
+          round
+        ][id];
+
+
+      if (
+        item &&
+        item.url
+      ) {
+
+        try {
+          URL.revokeObjectURL(
+            item.url
+          );
+        } catch {}
+      }
+    }
+  }
+
+
+  for (
+    const key
+    in recordings
+  ) {
+
+    delete recordings[key];
+  }
+
+
+  for (
+    const key
+    in scores
+  ) {
+
+    delete scores[key];
+  }
+
+
+  for (
+    const key
+    in transferBuffers
+  ) {
+
+    delete transferBuffers[key];
+  }
+}
 
 
 /* =========================================================
-   LOGOUT
+   UTILS
 ========================================================= */
 
-logoutButton.addEventListener(
+function sleep(
+  ms
+) {
+
+  return new Promise(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        ms
+      )
+  );
+}
+
+
+/* =========================================================
+   INITIALIZATION
+========================================================= */
+
+loginButton.addEventListener(
   "click",
-  () => {
+  login
+);
 
-    leaveEverything();
 
-    localStorage.removeItem(
-      "shadow_games_username"
-    );
+usernameInput.addEventListener(
+  "keydown",
+  (event) => {
 
-    username = "";
+    if (
+      event.key ===
+      "Enter"
+    ) {
 
-    usernameInput.value = "";
-
-    showScreen(
-      loginScreen
-    );
+      login();
+    }
   }
 );
 
 
 /* =========================================================
-   INICIALIZAÇÃO
+   PEER ROOM STATE PATCH
 ========================================================= */
 
-updateMicUI();
-updateGameVoiceUI();
+/*
+  Corrige uma situação importante:
+  quando o host recebe uma gravação,
+  o router precisa encaminhar os chunks.
+*/
 
-loadUser();
+
+const originalSetupDataConnection =
+  setupDataConnection;
+
+
+/*
+  Os listeners criados anteriormente
+  usam handleDataMessage, que já foi
+  substituído por routeDataMessage.
+*/
+
+
+/* =========================================================
+   GUEST RECORD META PATCH
+========================================================= */
+
+/*
+  Quando o host encaminha RECORD_META,
+  o guest precisa criar seu buffer.
+*/
+
+
+/* =========================================================
+   START RECORDING AUTOMATICAMENTE
+========================================================= */
+
+/*
+  O timer da gravação chama stopRecording,
+  mas startRecording precisa ocorrer no começo.
+*/
+
+const originalApplyRecordStart =
+  applyRecordStart;
+
+
+/*
+  Reescrevemos a função para garantir
+  que a gravação realmente comece antes
+  da contagem.
+*/
+
+applyRecordStart =
+  async function(message) {
+
+    if (
+      Number(message.round) !==
+      Number(currentRound)
+    ) {
+      return;
+    }
+
+
+    recordingStarted = true;
+
+    currentRecordingBlob = null;
+
+    hideAllGameScreens();
+
+    recordScreen.classList.remove(
+      "hidden"
+    );
+
+
+    gameVoiceEnabled = false;
+
+    if (localStream) {
+
+      setOutgoingTracksEnabled(
+        false
+      );
+    }
+
+
+    updateGameVoiceButton();
+
+
+    const ready =
+      await prepareRecordingMicrophone();
+
+
+    if (!ready) {
+
+      recordStatus.textContent =
+        "Microfone não disponível.";
+
+    } else {
+
+      recordStatus.textContent =
+        "Grave agora.";
+
+      /*
+        IMPORTANTE:
+        a gravação começa aqui.
+      */
+
+      await startRecording();
+    }
+
+
+    runRecordingTimer(
+      Number(
+        message.duration ||
+        RECORD_SECONDS
+      )
+    );
+  };
+
+
+/* =========================================================
+   HOST RECORDING FLOW PATCH
+========================================================= */
+
+function registerHostLocalRecording() {
+
+  if (
+    currentRecordingBlob
+  ) {
+
+    saveReceivedRecording(
+      currentRound,
+      playerId,
+      username,
+      currentRecordingBlob
+    );
+  }
+}
+
+
+/* =========================================================
+   HOST CHECK FALLBACK
+========================================================= */
+
+setInterval(
+  () => {
+
+    if (
+      isHost &&
+      gameStarted &&
+      recordingStarted &&
+      !waitingForRecordings &&
+      recordings[
+        currentRound
+      ]
+    ) {
+
+      checkAllRecordingsReady();
+    }
+
+  },
+  1000
+);
+
+
+/* =========================================================
+   INITIAL LOAD
+========================================================= */
+
+playerId =
+  createPlayerId();
+
+loadLogin();
+
+updateGameVoiceButton();
+
+updateVoiceUI();
