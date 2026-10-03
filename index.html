@@ -10,23 +10,17 @@
 <body>
 <main class="app">
 
-  <!-- LOGIN -->
   <section id="login">
     <div class="logo">SHADOW <span>GAMES</span></div>
     <p class="subtitle">Entre para continuar</p>
 
-    <input
-      id="username"
-      maxlength="16"
-      autocomplete="off"
-      placeholder="Nome de usuário"
-    >
+    <input id="username" maxlength="16" autocomplete="off"
+      placeholder="Nome de usuário">
 
     <button id="loginButton">Entrar</button>
     <div id="loginStatus" class="form-status"></div>
   </section>
 
-  <!-- HOME -->
   <section id="home" class="hidden">
 
     <div class="profile">
@@ -44,7 +38,6 @@
     <button id="create">Criar sala</button>
     <button id="join">Entrar em sala</button>
 
-    <!-- ENTRAR EM SALA -->
     <div id="joinPanel" class="join-panel hidden">
       <div class="join-title">Entrar em sala</div>
       <div class="join-description">Digite o código da sala</div>
@@ -54,7 +47,7 @@
         maxlength="8"
         autocomplete="off"
         inputmode="text"
-        placeholder="Código da sala"
+        placeholder="CÓDIGO"
       >
 
       <button id="joinConfirm">Entrar</button>
@@ -66,7 +59,6 @@
     <button id="logout" class="secondary">Trocar conta</button>
   </section>
 
-  <!-- ROOM -->
   <section id="room" class="hidden">
 
     <h2>Sala</h2>
@@ -76,19 +68,24 @@
       <strong id="roomCode">------</strong>
     </div>
 
-    <button id="copyCode" class="secondary">Copiar código</button>
+    <button id="copyCode" class="secondary">
+      Copiar código
+    </button>
 
     <div class="voice-panel">
+
       <div class="voice-info">
         <div class="voice-title">Voz</div>
+
         <div id="voiceStatus" class="voice-status">
           Microfone desligado
         </div>
       </div>
 
-      <button id="micButton" class="mic-button" type="button">
+      <button id="micButton" class="mic-button">
         Ativar microfone
       </button>
+
     </div>
 
     <p id="status">Preparando sala...</p>
@@ -98,13 +95,17 @@
     <div id="remoteAudios"></div>
 
     <button id="start">Começar partida</button>
-    <button id="leaveRoom" class="secondary">Sair da sala</button>
+
+    <button id="leaveRoom" class="secondary">
+      Sair da sala
+    </button>
+
   </section>
 
-  <!-- GAME -->
   <section id="game" class="hidden">
 
     <div class="game-header">
+
       <div>
         <div class="game-label">SHADOW GAMES</div>
         <div id="roundText" class="round-text">
@@ -113,28 +114,33 @@
       </div>
 
       <div class="game-actions">
+
         <div id="gamePlayers" class="game-players">
           0/5
         </div>
 
         <button
           id="gameVoiceButton"
-          class="game-voice-button"
-          type="button"
+          class="game-voice-button off"
         >
           Voz: OFF
         </button>
+
       </div>
     </div>
 
-    <!-- COUNTDOWN -->
     <div id="countdownScreen" class="game-center">
-      <div class="countdown-label">PREPARE-SE</div>
-      <div id="countdownNumber" class="countdown-number">5</div>
+      <div class="countdown-label">
+        PREPARE-SE
+      </div>
+
+      <div id="countdownNumber" class="countdown-number">
+        5
+      </div>
     </div>
 
-    <!-- REFERÊNCIA -->
     <div id="referenceScreen" class="game-center hidden">
+
       <div class="game-label">OUÇA</div>
 
       <h2>Som de referência</h2>
@@ -150,10 +156,11 @@
       <div id="referenceStatus" class="game-status">
         Prepare-se...
       </div>
+
     </div>
 
-    <!-- GRAVAÇÃO -->
     <div id="recordScreen" class="game-center hidden">
+
       <div class="game-label">GRAVAÇÃO</div>
 
       <h2>Faça o som</h2>
@@ -165,10 +172,11 @@
       <div id="recordStatus" class="record-status">
         Preparando...
       </div>
+
     </div>
 
-    <!-- PLAYBACK -->
     <div id="playbackScreen" class="game-center hidden">
+
       <div class="game-label">REPRODUÇÃO</div>
 
       <h2 id="playbackName">
@@ -182,10 +190,11 @@
       <div id="playbackStatus" class="record-status">
         Ouça a gravação
       </div>
+
     </div>
 
-    <!-- RESULTADO -->
     <div id="resultScreen" class="game-center hidden">
+
       <div class="game-label">RESULTADO</div>
 
       <h2>Rodada concluída</h2>
@@ -193,6 +202,7 @@
       <p id="resultText">
         Preparando resultado...
       </p>
+
     </div>
 
   </section>
